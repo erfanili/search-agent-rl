@@ -1,0 +1,14 @@
+# Retrieval env (.venv): encode_corpus.py, build_index.py, retrieval_server.py, bench_retrieval.py.
+# Python 3.10, CUDA 12.4 wheels (driver 550 supports CUDA <= 12.4). Training uses requirements-verl.txt.
+# Top-level packages only; everything else is resolved from these.
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+torch==2.6.0+cu124
+transformers==5.20.1
+numpy==2.2.6
+pyarrow==25.0.1
+faiss-gpu-cu12==1.14.1.post1
+fastapi==0.146.0
+uvicorn==0.54.0
+requests==2.34.2
+datasets==5.1.0
