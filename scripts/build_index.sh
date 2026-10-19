@@ -5,11 +5,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=${HF_HOME:-/data/erfan/hf_cache}   # keep model downloads under /data/erfan, not ~/.cache
-INPUT=/data/erfan/corpus/data/psgs_w100/no_embeddings
-EMB=/data/erfan/emb_e5
+export HF_HOME=${HF_HOME:-/data/erfan/search-rl-agent-data/hf_cache}   # keep model downloads under /data/erfan/search-rl-agent-data, not ~/.cache
+INPUT=/data/erfan/search-rl-agent-data/corpus/data/psgs_w100/no_embeddings
+EMB=/data/erfan/search-rl-agent-data/emb_e5
 FACTORY=${FACTORY:-IVF4096,SQ8}
-OUT=/data/erfan/index_e5_${FACTORY//[^A-Za-z0-9]/_}
+OUT=/data/erfan/search-rl-agent-data/index_e5_${FACTORY//[^A-Za-z0-9]/_}
 
 # k-means on every GPU in configs/gpus.env; CPU threads pinned to those GPUs' NUMA node(s)
 CPUS=$(cpus_for "$GPUS")yes

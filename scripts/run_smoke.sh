@@ -17,7 +17,7 @@ for g in "${GPU_LIST[@]}"; do
     fi
 done
 
-LOGS=/data/erfan/logs   # all run output lives under /data/erfan
+LOGS=/data/erfan/search-rl-agent-data/logs   # all run output lives under /data/erfan/search-rl-agent-data
 mkdir -p "$LOGS"
 nohup bash scripts/p0_7_smoke_grpo_gsm8k.sh > "$LOGS/p0_7_launch.log" 2>&1 &
 RUN_PID=$!

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Wait for the index build, start the retrieval server, then run the Search-R1 baseline eval
 # and the P0.6 retrieval benchmark (one after the other, so the benchmark's latency isn't skewed).
-#   nohup bash scripts/queue_baseline_after_index.sh > /data/erfan/logs/queue_baseline.log 2>&1 &
+#   nohup bash scripts/queue_baseline_after_index.sh > /data/erfan/search-rl-agent-data/logs/queue_baseline.log 2>&1 &
 # The server is left running afterwards; stop it with: pkill -f "[r]etrieval_server.py"
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-INDEX=/data/erfan/index_e5_IVF4096_SQ8
+INDEX=/data/erfan/search-rl-agent-data/index_e5_IVF4096_SQ8
 log() { echo "[$(date '+%F %T')] $*"; }
 
 log "waiting for the index build to finish"

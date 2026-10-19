@@ -1,0 +1,17 @@
+# Agent loops verl may run (actor_rollout_ref.rollout.agent.agent_loop_config_path).
+# Each training row's agent_name column picks one. Keys other than name/_target_ are passed to
+# SearchR1AgentLoop.init_class (agent/verl_agent_loop.py).
+#
+# Defaults copy Search-R1 and baselines/searchr1_infer.py so trained and baseline agents see the
+# same environment. Changing any of them changes the task: log it in the decision log.
+
+- name: search_r1_agent
+  _target_: agent.verl_agent_loop.SearchR1AgentLoop
+  retrieval_url: http://127.0.0.1:8000
+  max_turns: 4            # turns that may search; then one final turn without retrieval
+  topk: 3                 # passages per search (Search-R1: 3)
+  max_obs_tokens: 500     # passage text cut to this many tokens (Search-R1 max_obs_length)
+  invalid_action: retry   # retry: Search-R1's invalid-action message and another turn; stop: end episode
+  chat_template: true     # false for base models prompted without chat markup (check with P1.2)
+  dump_dir: null          # set to a directory to write episodes for scripts/view_rollouts.py
+  dump_max: 200           # episodes written per worker process

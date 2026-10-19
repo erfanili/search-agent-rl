@@ -5,8 +5,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-INDEX=${1:-/data/erfan/index_e5_IVF4096_SQ8}
-export HF_HOME=${HF_HOME:-/data/erfan/hf_cache}   # / is ~99% full; keep caches on /data
+INDEX=${1:-/data/erfan/search-rl-agent-data/index_e5_IVF4096_SQ8}
+export HF_HOME=${HF_HOME:-/data/erfan/search-rl-agent-data/hf_cache}   # / is ~99% full; keep caches on /data
 mkdir -p "$INDEX/logs"
 
 CUDA_VISIBLE_DEVICES=$RETRIEVAL_GPU nohup taskset -c "$(cpus_for "$RETRIEVAL_GPU")" \

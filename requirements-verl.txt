@@ -5,7 +5,7 @@
 torch==2.6.0+cu124
 vllm==0.8.5
 flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
--e file:///data/erfan/src/verl  # verl 0.5.0, commit 8fdc4d3f
+-e file:///data/erfan/search-rl-agent-data/src/verl  # verl 0.5.0, commit 8fdc4d3f
 
 ray[default]==2.47.1
 transformers==4.51.3
@@ -16,3 +16,4 @@ peft==0.21.2
 datasets==4.8.5  # 5.x needs huggingface-hub>=1.31; transformers 4.51.3 needs <1.0
 wandb==0.28.0
 cupy-cuda12x==13.6.0
+pytest==9.1.1                # tests/test_rollout_contract.py

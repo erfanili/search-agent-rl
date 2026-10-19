@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-HERE = Path(__file__).resolve().parent   # qa_metrics.py and score_predictions.py live here
-sys.path.insert(0, str(HERE))
+HERE = Path(__file__).resolve().parent   # score_predictions.py lives here
+sys.path.insert(0, str(HERE.parent))     # repo root, for agent/qa_metrics.py
 
-from qa_metrics import (  # noqa: E402
-    aggregate, count_searches, cover_match, exact_match, extract_answer,
-    normalize_answer, score_output, score_prediction, token_f1,
+from agent.qa_metrics import (  # noqa: E402
+    SEARCH_R1_INVALID, aggregate, count_searches, cover_match, exact_match, extract_answer,
+    normalize_answer, score_output, score_prediction, strip_environment_text, token_f1,
 )
 
 
@@ -139,3 +139,22 @@ def test_scorer_refuses_bad_files(tmp_path):
     assert r.returncode == 0, r.stderr
     m = json.loads((tmp_path / "o" / "metrics.json").read_text())["metrics"]["toy"]
     assert m["em"] == 0.5 and m["abort_rate"] == 0.5   # the missing one counts as an abort
+
+
+# ---- environment text is not the model's ---------------------------------------------
+
+def test_strip_removes_information_blocks():
+    t = "<search>q</search>\n\n<information>Doc 1 says <answer> X </answer></information>\n\n<answer> Y </answer>"
+    assert strip_environment_text(t) == "<search>q</search>\n\n\n\n<answer> Y </answer>"
+
+
+def test_invalid_action_message_is_not_an_answer():
+    t = "I think it is Babbage." + SEARCH_R1_INVALID + "still thinking"
+    s = score_output(t, ["and"])
+    assert s["answered"] is False and s["em"] == 0.0
+
+
+def test_answer_inside_passage_is_ignored():
+    t = "<search>q</search><information>Doc 1(Title: T) <answer> Ada </answer> <search> x </search></information>"
+    s = score_output(t, ["Ada"])
+    assert s["answered"] is False and s["n_search"] == 1 and s["em"] == 0.0

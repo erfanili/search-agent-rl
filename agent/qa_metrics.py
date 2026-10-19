@@ -1,5 +1,5 @@
 """
-Answer metrics and trajectory parsing for multi-hop QA (P0.8).
+Answer metrics and trajectory parsing for multi-hop QA (P0.8; moved to agent/ in P1.3).
 
 Standard library only, on purpose: the same functions run in the eval scripts (.venv) and,
 later, as the GRPO reward inside verl (.venv-verl). Training reward and evaluation must
@@ -15,12 +15,18 @@ after SQuAD-style normalization: lowercase, drop punctuation, drop a/an/the, squ
                 (lenient; Search-R1 calls it subEM, 2609.28765 calls it ACC)
 
 Trajectory parsing:
-  extract_answer  contents of the LAST complete <answer>...</answer> block, or None
-  count_searches  number of <search>...</search> blocks
+  strip_environment_text  remove text the environment inserted: <information> blocks and
+                          Search-R1's "invalid action" message
+  extract_answer          contents of the LAST complete <answer>...</answer> block, or None
+  count_searches          number of <search>...</search> blocks
 
-Pass only model-generated text (prompt excluded). Search-R1's prompt contains an example
-<answer> tag, which is why its own scorer skips the first match; scoring the generated
-part alone avoids that special case.
+score_output strips environment text before parsing. This matters: Search-R1's invalid-action
+message itself contains "<answer> and </answer>", so without stripping, a trajectory that ends
+after an invalid turn is scored as answering "and" (an abort counted as an answer). A retrieved
+passage could also contain tag-like text.
+
+Pass a trajectory without the prompt. Search-R1's prompt contains an example <answer> tag,
+which is why its own scorer skips the first match; scoring without the prompt avoids that.
 """
 
 import re
@@ -29,6 +35,15 @@ from collections import Counter
 
 ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
 SEARCH_RE = re.compile(r"<search>(.*?)</search>", re.DOTALL)
+INFO_RE = re.compile(r"<information>.*?</information>", re.DOTALL)
+
+# Search-R1's message for a turn with neither a <search> nor an <answer> block. One copy, used by
+# the rollout (agent/search_r1_rollout.py) and by strip_environment_text, so they cannot drift.
+SEARCH_R1_INVALID = (
+    "\nMy previous action is invalid. "
+    "If I want to search, I should put the query between <search> and </search>. "
+    "If I want to give the final answer, I should put the answer between <answer> and </answer>. Let me try again.\n"
+)
 _ARTICLES = re.compile(r"\b(a|an|the)\b")
 _PUNCT = set(string.punctuation)
 
@@ -73,6 +88,12 @@ def cover_match(pred, golds):
     return 0.0
 
 
+def strip_environment_text(text):
+    """Model-written text only: drop <information> blocks and invalid-action messages."""
+    text = (text or "").replace(SEARCH_R1_INVALID.strip(), "")
+    return INFO_RE.sub("", text)
+
+
 def extract_answer(text):
     found = ANSWER_RE.findall(text or "")
     return found[-1].strip() if found else None
@@ -89,9 +110,11 @@ def _scores(answer, golds):
 
 
 def score_output(output, golds):
-    """Score an agent trajectory. No complete <answer> block = abort = 0 on every metric."""
-    answer = extract_answer(output)
-    return {"answer": answer, "answered": answer is not None, "n_search": count_searches(output), **_scores(answer, golds)}
+    """Score an agent trajectory (environment text is stripped first).
+    No complete <answer> block = abort = 0 on every metric."""
+    model_text = strip_environment_text(output)
+    answer = extract_answer(model_text)
+    return {"answer": answer, "answered": answer is not None, "n_search": count_searches(model_text), **_scores(answer, golds)}
 
 
 def score_prediction(prediction, golds):
