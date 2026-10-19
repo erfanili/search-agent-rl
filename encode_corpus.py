@@ -32,12 +32,8 @@ Example:
       --out /data/erfan/emb_test --max-length 256 --shard-size 2000
   python encode_corpus.py verify --input /data/erfan/corpus/dummy.no_embeddings --out /data/erfan/emb_test
 
-  # 2. full corpus, one process per GPU (only GPUs 0-5 are ours)
-  for r in 0 1 2 3 4 5; do
-    CUDA_VISIBLE_DEVICES=$r nohup python encode_corpus.py encode \
-      --input /data/erfan/corpus/no_embeddings --out /data/erfan/emb_e5 \
-      --max-length 256 --rank $r --world-size 6 > logs/encode_$r.log 2>&1 &
-  done
+  # 2. full corpus, one process per GPU listed in configs/gpus.env
+  bash scripts/encode_corpus.sh
 """
 
 import argparse
@@ -53,7 +49,7 @@ import pyarrow.parquet as pq
 MODEL = "intfloat/e5-base-v2"
 PASSAGE_PREFIX = "passage: "  # E5 requires this; "query: " goes on queries at search time
 DIM = 768
-ALLOWED_GPUS = {0, 1, 2, 3, 4, 5}  # shared node: only the first 6 GPUs may be used
+GPU_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "gpus.env")
 
 
 # ----------------------------------------------------------------------------- corpus
@@ -218,14 +214,25 @@ def shard_paths(out, k):
     return os.path.join(out, f"ids_{k:05d}.npy"), os.path.join(out, f"emb_{k:05d}.npy")
 
 
+def allowed_gpus():
+    """GPUS from configs/gpus.env, the single source of truth shared with scripts/gpus.sh."""
+    with open(GPU_CONFIG) as f:
+        for line in f:
+            key, sep, value = line.split("#", 1)[0].strip().partition("=")
+            if sep and key.strip() == "GPUS":
+                return {int(g) for g in value.strip().split(",")}
+    sys.exit(f"no GPUS= line in {GPU_CONFIG}")
+
+
 def check_gpus():
     # without CUDA_VISIBLE_DEVICES every rank would land on GPU 0, or on a GPU that isn't ours
+    allowed = sorted(allowed_gpus())
     vis = os.environ.get("CUDA_VISIBLE_DEVICES")
     if not vis:
-        sys.exit(f"set CUDA_VISIBLE_DEVICES to one of {sorted(ALLOWED_GPUS)}")
-    bad = [g for g in vis.split(",") if not (g.strip().isdigit() and int(g) in ALLOWED_GPUS)]
+        sys.exit(f"set CUDA_VISIBLE_DEVICES to one of {allowed} (configs/gpus.env)")
+    bad = [g for g in vis.split(",") if not (g.strip().isdigit() and int(g) in allowed)]
     if bad:
-        sys.exit(f"CUDA_VISIBLE_DEVICES={vis}: {bad} not allowed, use only {sorted(ALLOWED_GPUS)}")
+        sys.exit(f"CUDA_VISIBLE_DEVICES={vis}: {bad} not allowed, use only {allowed} (configs/gpus.env)")
 
 
 def cmd_encode(args):

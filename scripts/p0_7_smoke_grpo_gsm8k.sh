@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# P0.7 smoke test: verl GRPO on GSM8K, Qwen2.5-0.5B, 20 steps, 4 GPUs.
+# P0.7 smoke test: verl GRPO on GSM8K, Qwen2.5-0.5B, 20 steps.
 #
 # Goal: prove verl + vLLM + FSDP run end to end on this server, and record
 # per-step time and GPU memory. Not a training run: no validation, no checkpoints.
 #
-# Usage (from the repo root, inside .venv-verl):
-#   VERL_DIR=/path/to/verl MODEL_PATH=/path/to/Qwen2.5-0.5B-Instruct \
-#       bash scripts/p0_7_smoke_grpo_gsm8k.sh
-#   python scripts/summarize_smoke.py logs/p0_7_smoke_<timestamp>
+# GPUs come from configs/gpus.env (the only place to change them). verl needs every
+# batch to split evenly across GPUs, so the script uses the largest number of GPUs from
+# that list that works (e.g. 6 allowed -> 5 used, 3 -> 2) and says so. If the retrieval
+# server is running, its GPU is left out.
+#
+# Usage (from the repo root; no venv activation needed):
+#   bash scripts/p0_7_smoke_grpo_gsm8k.sh
+#   .venv-verl/bin/python scripts/summarize_smoke.py logs/p0_7_smoke_<timestamp>
 #
 # Outputs in logs/p0_7_smoke_<timestamp>/:
 #   train.log    verl console output (one "step:N - key:value - ..." line per step)
@@ -15,13 +19,20 @@
 #   config.txt   every setting below, for the decision log
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
+source scripts/gpus.sh
 
 # ---- settings (edit here, not in the command) --------------------------------
-VERL_DIR=${VERL_DIR:?set VERL_DIR to your verl clone (needs examples/data_preprocess/gsm8k.py)}
-MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-0.5B-Instruct}
+PY=$PWD/.venv-verl/bin/python   # training env; see notes/environments.md
+VERL_DIR=${VERL_DIR:-/data/erfan/src/verl}
+MODEL_PATH=${MODEL_PATH:-/data/erfan/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775}
 DATA_DIR=${DATA_DIR:-/data/erfan/verl_data/gsm8k}
-GPUS=${GPUS:-0,1,2,3}
-N_GPUS=$(echo "$GPUS" | tr ',' '\n' | wc -l)
+export HF_HOME=${HF_HOME:-/data/erfan/hf_cache}       # / is ~99% full: keep caches on /data
+export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/ray_tmp}  # Ray logs and spill files, same reason
+# GPU-to-GPU (P2P) copies appear to hang on this machine (AMD EPYC, IOMMU on): the first NCCL
+# broadcast never finished and the run died after the 30-min timeout. Route transfers through
+# host memory instead. Check with: bash scripts/nccl_check.sh
+export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
 
 STEPS=20
 TRAIN_BATCH=64          # prompts per step
@@ -36,31 +47,62 @@ LR=1e-6
 KL_COEF=0.001
 # -------------------------------------------------------------------------------
 
+# ---- pick GPUs from configs/gpus.env -------------------------------------------
+CANDIDATES=("${GPU_LIST[@]}")
+if server_running; then
+    CANDIDATES=()
+    for g in "${GPU_LIST[@]}"; do [[ $g == "$RETRIEVAL_GPU" ]] || CANDIDATES+=("$g"); done
+    echo "retrieval server is running: leaving its GPU $RETRIEVAL_GPU out"
+fi
+# verl splits TRAIN_BATCH*ROLLOUT_N responses across GPUs, and each GPU's share of a
+# mini-batch must be a whole number of micro-batches
+fits() {
+    local k=$1 per_gpu
+    (( (TRAIN_BATCH * ROLLOUT_N) % k == 0 && (MINI_BATCH * ROLLOUT_N) % k == 0 )) || return 1
+    per_gpu=$(( MINI_BATCH * ROLLOUT_N / k ))
+    (( per_gpu % MICRO_PER_GPU == 0 ))
+}
+N_GPUS=0
+for (( k=${#CANDIDATES[@]}; k>=1; k-- )); do
+    if fits "$k"; then N_GPUS=$k; break; fi
+done
+if (( N_GPUS == 0 )); then
+    echo "no usable GPU count from: ${CANDIDATES[*]:-none}" >&2
+    exit 1
+fi
+GPUS=$(IFS=,; echo "${CANDIDATES[*]:0:N_GPUS}")
+if (( N_GPUS < ${#CANDIDATES[@]} )); then
+    echo "using $N_GPUS of ${#CANDIDATES[@]} available GPUs (${#CANDIDATES[@]} doesn't split the batch evenly)"
+fi
+echo "GPUs: $GPUS"
+# -------------------------------------------------------------------------------
+
 STAMP=$(date +%Y%m%d_%H%M%S)
 OUT=logs/p0_7_smoke_${STAMP}
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$RAY_TMPDIR"
 export CUDA_VISIBLE_DEVICES=$GPUS
 
 # flash-attn is needed for use_remove_padding (packing without pad tokens)
-if python -c "import flash_attn" 2>/dev/null; then REMOVE_PAD=True; else REMOVE_PAD=False; fi
+if "$PY" -c "import flash_attn" 2>/dev/null; then REMOVE_PAD=True; else REMOVE_PAD=False; fi
 
 # 1. data: verl's own GSM8K preprocessor writes train/test parquet with prompt + rule-based reward info
 if [[ ! -f $DATA_DIR/train.parquet ]]; then
-    python "$VERL_DIR/examples/data_preprocess/gsm8k.py" --local_dir "$DATA_DIR"
+    "$PY" "$VERL_DIR/examples/data_preprocess/gsm8k.py" --local_dir "$DATA_DIR"
 fi
 
 # 2. record the configuration
 {
     echo "date: $(date -Is)"
     echo "git: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-    echo "verl: $(python -c 'import verl; print(verl.__version__)' 2>/dev/null || echo unknown)"
-    echo "vllm: $(python -c 'import vllm; print(vllm.__version__)')"
-    echo "torch: $(python -c 'import torch; print(torch.__version__, torch.version.cuda)')"
-    echo "gpus: $GPUS ($N_GPUS)"
+    echo "verl: $("$PY" -c 'import verl; print(verl.__version__)' 2>/dev/null || echo unknown)"
+    echo "vllm: $("$PY" -c 'import vllm; print(vllm.__version__)' 2>/dev/null)"
+    echo "torch: $("$PY" -c 'import torch; print(torch.__version__, torch.version.cuda)')"
+    echo "gpus: $GPUS ($N_GPUS used; allowance in configs/gpus.env: ${GPU_LIST[*]})"
     echo "model: $MODEL_PATH"
     echo "steps=$STEPS train_batch=$TRAIN_BATCH n=$ROLLOUT_N mini_batch=$MINI_BATCH micro_per_gpu=$MICRO_PER_GPU"
+    echo "NCCL_P2P_DISABLE=$NCCL_P2P_DISABLE"
     echo "max_prompt=$MAX_PROMPT max_response=$MAX_RESPONSE vllm_mem=$VLLM_MEM lr=$LR kl=$KL_COEF remove_padding=$REMOVE_PAD"
-    nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv
+    nvidia-smi -i "$GPUS" --query-gpu=index,name,memory.total,driver_version --format=csv
 } > "$OUT/config.txt"
 
 # 3. GPU memory sampler in the background, stopped on exit
@@ -69,7 +111,7 @@ SMI_PID=$!
 trap 'kill $SMI_PID 2>/dev/null || true' EXIT
 
 # 4. train
-python -m verl.trainer.main_ppo \
+"$PY" -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="$DATA_DIR/train.parquet" \
@@ -113,4 +155,4 @@ python -m verl.trainer.main_ppo \
     2>&1 | tee "$OUT/train.log"
 
 echo "done: $OUT"
-echo "next: python scripts/summarize_smoke.py $OUT"
+echo "next: $PY scripts/summarize_smoke.py $OUT"
