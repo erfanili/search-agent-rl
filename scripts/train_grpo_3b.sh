@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # GRPO on Qwen2.5-3B Base with Search-R1 rollouts (D-07..D-09): full fine-tuning or LoRA, same everything else.
 #
-#   bash scripts/train_grpo_3b.sh full                   # Search-R1 recipe, 1005 steps
-#   TOTAL_STEPS=5 bash scripts/train_grpo_3b.sh full     # pilot: step time and memory before a long run
+#   bash scripts/train_grpo_3b.sh full                   # one-day run: 300 steps of 128 x 5
+#   TOTAL_STEPS=3 bash scripts/train_grpo_3b.sh full     # pilot: step time and memory before a long run
 #   bash scripts/train_grpo_3b.sh lora
 #   DRY_RUN=1 bash scripts/train_grpo_3b.sh full         # print the resolved verl config, start nothing
 #
 # Hyperparameters follow Search-R1's train_grpo.sh (Qwen2.5-3B, GRPO, EM reward) unless noted:
-#   batch 512 prompts x 5 samples, mini-batch 256, lr 1e-6 with 28.5% warmup, KL loss 0.001 low_var_kl,
-#   temperature 1, vLLM memory 0.6, actor param+optimizer offload, ref param offload, 1005 steps, val every 50.
+#   5 samples per prompt, lr 1e-6 with 28.5% warmup, KL loss 0.001 low_var_kl, temperature 1,
+#   actor param+optimizer offload, ref param offload, val every 50 steps.
+# Defaults are sized to finish in under a day on 5 A5000s (D-12). Search-R1's full recipe:
+#   TRAIN_BATCH=512 MINI_BATCH=256 TOTAL_STEPS=1005 MAX_RESPONSE=3072 bash scripts/train_grpo_3b.sh full
 # Differences, all deliberate:
 #   - max_turns 4 (Search-R1's script: 2): the same environment as our eval rollouts (configs/agent_loop.yaml).
 #   - one response budget for the whole episode (MAX_RESPONSE) instead of 500 per turn: verl v0.5 sets
@@ -44,15 +46,18 @@ export VLLM_USE_V1=1   # verl async server needs vLLM V1; unset, vLLM falls back
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}  # Ray workers import agent/ from the repo root
 
 # ---- settings -------------------------------------------------------------------
-TRAIN_BATCH=${TRAIN_BATCH:-512}        # prompts per step
+TRAIN_BATCH=${TRAIN_BATCH:-128}        # prompts per step (Search-R1: 512)
 ROLLOUT_N=${ROLLOUT_N:-5}              # samples per prompt (the GRPO group)
-MINI_BATCH=${MINI_BATCH:-256}          # prompts per actor update -> 2 updates per step
+MINI_BATCH=${MINI_BATCH:-64}           # prompts per actor update -> 2 updates per step, as in Search-R1
 MAX_PROMPT=${MAX_PROMPT:-512}          # prompts are ~160 tokens
-MAX_RESPONSE=${MAX_RESPONSE:-3072}     # whole episode: model turns + retrieved passages
-MAX_TOKENS_PER_GPU=${MAX_TOKENS_PER_GPU:-12288}   # actor micro-batch size, in tokens
-VLLM_MEM=${VLLM_MEM:-0.6}
+MAX_RESPONSE=${MAX_RESPONSE:-2048}     # whole episode: model turns + retrieved passages; the tail sets step time
+# Actor micro-batch size in tokens. The logits alone are tokens x 151,936 vocab: 12,288 tokens OOMed
+# in backward on 24 GB (pilot 2026-10-19). Log-prob passes have no backward and take 4x this.
+MAX_TOKENS_PER_GPU=${MAX_TOKENS_PER_GPU:-6144}
+VLLM_MEM=${VLLM_MEM:-0.7}              # vLLM has the GPU to itself during rollout (actor offloaded, KV freed after)
+ENFORCE_EAGER=${ENFORCE_EAGER:-False}  # False: CUDA graphs, much faster decoding for a 3B model (verl default: True)
 AGENT_WORKERS=${AGENT_WORKERS:-8}
-TOTAL_STEPS=${TOTAL_STEPS:-1005}
+TOTAL_STEPS=${TOTAL_STEPS:-300}
 WARMUP_RATIO=${WARMUP_RATIO:-0.285}
 TEST_FREQ=${TEST_FREQ:-50}
 SAVE_FREQ=${SAVE_FREQ:-100}
@@ -144,10 +149,11 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=$VLLM_MEM \
-    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 2)) \
+    actor_rollout_ref.rollout.enforce_eager=$ENFORCE_EAGER \
+    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 4)) \
     actor_rollout_ref.rollout.agent.num_workers=$AGENT_WORKERS \
     actor_rollout_ref.rollout.agent.agent_loop_config_path="$OUT/agent_loop.yaml" \
-    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 2)) \
+    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 4)) \
     "${METHOD_ARGS[@]}" \
     custom_reward_function.path="$PWD/agent/reward.py" \
     custom_reward_function.name=compute_score \
