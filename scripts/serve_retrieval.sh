@@ -10,6 +10,6 @@ export HF_HOME=${HF_HOME:-/data/erfan/hf_cache}   # / is ~99% full; keep caches 
 mkdir -p "$INDEX/logs"
 
 CUDA_VISIBLE_DEVICES=$RETRIEVAL_GPU nohup taskset -c "$(cpus_for "$RETRIEVAL_GPU")" \
-    .venv/bin/python retrieval_server.py --index-dir "$INDEX" --nprobe "${NPROBE:-64}" \
+    .venv/bin/python retrieval/retrieval_server.py --index-dir "$INDEX" --nprobe "${NPROBE:-64}" \
     --threads "$(ncpus_for "$RETRIEVAL_GPU")" --port 8000 > "$INDEX/logs/server.log" 2>&1 &
 echo "server starting on GPU $RETRIEVAL_GPU (pid $!); log: $INDEX/logs/server.log; check: curl localhost:8000/health"

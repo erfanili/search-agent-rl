@@ -15,5 +15,5 @@ OUT=/data/erfan/index_e5_${FACTORY//[^A-Za-z0-9]/_}
 CPUS=$(cpus_for "$GPUS")
 echo "GPUs $GPUS, CPUs $CPUS"
 CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$CPUS" \
-    .venv/bin/python build_index.py --emb-dir "$EMB" --corpus "$INPUT" --out "$OUT" \
+    .venv/bin/python retrieval/build_index.py --emb-dir "$EMB" --corpus "$INPUT" --out "$OUT" \
     --factory "$FACTORY" --train-size 1000000 --gpu-train --threads "$(ncpus_for "$GPUS")"

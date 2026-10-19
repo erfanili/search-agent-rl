@@ -25,12 +25,12 @@ number of GPUs, so a run can be resumed with a different --world-size.
 
 Example:
   # 0. choose max_length
-  python encode_corpus.py stats --input /data/erfan/corpus/no_embeddings --sample 20000
+  python retrieval/encode_corpus.py stats --input /data/erfan/corpus/no_embeddings --sample 20000
 
   # 1. end-to-end test on the 10k-row dummy corpus
-  python encode_corpus.py encode --input /data/erfan/corpus/dummy.no_embeddings \
+  python retrieval/encode_corpus.py encode --input /data/erfan/corpus/dummy.no_embeddings \
       --out /data/erfan/emb_test --max-length 256 --shard-size 2000
-  python encode_corpus.py verify --input /data/erfan/corpus/dummy.no_embeddings --out /data/erfan/emb_test
+  python retrieval/encode_corpus.py verify --input /data/erfan/corpus/dummy.no_embeddings --out /data/erfan/emb_test
 
   # 2. full corpus, one process per GPU listed in configs/gpus.env
   bash scripts/encode_corpus.sh
@@ -49,7 +49,7 @@ import pyarrow.parquet as pq
 MODEL = "intfloat/e5-base-v2"
 PASSAGE_PREFIX = "passage: "  # E5 requires this; "query: " goes on queries at search time
 DIM = 768
-GPU_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "gpus.env")
+GPU_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "configs", "gpus.env")
 
 
 # ----------------------------------------------------------------------------- corpus

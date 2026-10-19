@@ -1,7 +1,7 @@
 """Inspect the wiki_dpr `no_embeddings` corpus and write a JSON report.
 
 Usage:
-    python inspect_corpus.py \
+    python retrieval/inspect_corpus.py \
         --root /data/erfan/corpus/data/psgs_w100/no_embeddings \
         --out notes/corpus_inspection.json
 

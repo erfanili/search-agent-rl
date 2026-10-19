@@ -11,7 +11,7 @@ OUT=/data/erfan/emb_e5
 mkdir -p "$OUT/logs"
 
 for r in "${!GPU_LIST[@]}"; do
-    CUDA_VISIBLE_DEVICES=${GPU_LIST[$r]} nohup .venv/bin/python encode_corpus.py encode \
+    CUDA_VISIBLE_DEVICES=${GPU_LIST[$r]} nohup .venv/bin/python retrieval/encode_corpus.py encode \
         --input "$INPUT" --out "$OUT" --max-length 256 \
         --rank "$r" --world-size "$N_GPUS" > "$OUT/logs/encode_$r.log" 2>&1 &
 done

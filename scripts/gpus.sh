@@ -39,5 +39,5 @@ ncpus_for() {
 }
 
 server_running() {
-    pgrep -f "python[^ ]* retrieval_server.py" >/dev/null
+    pgrep -f "python[^ ]* [^ ]*retrieval_server.py" >/dev/null
 }
