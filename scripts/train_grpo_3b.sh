@@ -115,16 +115,7 @@ if "$PY" -c "import flash_attn" 2>/dev/null; then REMOVE_PAD=True; else REMOVE_P
 } > "$OUT/config.txt"
 echo "training GPUs: $GPUS (retrieval server on $RETRIEVAL_GPU); output: $OUT"
 
-CUDA_VISIBLE_DEVICES=$GPUS taray.exceptions.RayTaskError(AssertionError): ray::TaskRunner.run() (pid=3315620, ip=128.46.36.102, actor_id=703c62dc6703a217928646dd01000000, repr=<main_ppo.TaskRunner object at 0x77306ae97c10>)
-  File "/data/erfan/search-agent-rl-data/src/verl/verl/trainer/main_ppo.py", line 114, in run
-    local_path = copy_to_local(
-  File "/data/erfan/search-agent-rl-data/src/verl/verl/utils/fs.py", line 212, in copy_to_local
-    local_path = copy_local_path_from_hdfs(src, cache_dir, filelock, verbose, always_recopy)
-  File "/data/erfan/search-agent-rl-data/src/verl/verl/utils/fs.py", line 225, in copy_local_path_from_hdfs
-    assert src[-1] != "/", f"Make sure the last char in src is not / because it will cause error. Got {src}"
-AssertionError: Make sure the last char in src is not / because it will cause error. Got /data/erfan/search-agent-rl-data/hf_cache/hub/models--Qwen--Qwen2.5-3B/snapshots/3aab1f1954e9cc14eb9509a215f9e5ca08227a9b/
-
-Set the enviskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.trainer.main_ppo \
+CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     algorithm.use_kl_in_reward=False \
     data.train_files="$DATA_DIR/train.parquet" \
