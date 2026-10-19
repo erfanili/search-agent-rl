@@ -25,12 +25,12 @@ number of GPUs, so a run can be resumed with a different --world-size.
 
 Example:
   # 0. choose max_length
-  python retrieval/encode_corpus.py stats --input /data/erfan/search-rl-agent-data/corpus/data/psgs_w100/no_embeddings --sample 20000
+  python retrieval/encode_corpus.py stats --input /data/erfan/search-agent-rl-data/corpus/data/psgs_w100/no_embeddings --sample 20000
 
   # 1. end-to-end test on the 10k-row dummy corpus
-  python retrieval/encode_corpus.py encode --input /data/erfan/search-rl-agent-data/corpus/data/psgs_w100/dummy.no_embeddings \
-      --out /data/erfan/search-rl-agent-data/emb_test --max-length 256 --shard-size 2000
-  python retrieval/encode_corpus.py verify --input /data/erfan/search-rl-agent-data/corpus/data/psgs_w100/dummy.no_embeddings --out /data/erfan/search-rl-agent-data/emb_test
+  python retrieval/encode_corpus.py encode --input /data/erfan/search-agent-rl-data/corpus/data/psgs_w100/dummy.no_embeddings \
+      --out /data/erfan/search-agent-rl-data/emb_test --max-length 256 --shard-size 2000
+  python retrieval/encode_corpus.py verify --input /data/erfan/search-agent-rl-data/corpus/data/psgs_w100/dummy.no_embeddings --out /data/erfan/search-agent-rl-data/emb_test
 
   # 2. full corpus, one process per GPU listed in configs/gpus.env
   bash scripts/encode_corpus.sh

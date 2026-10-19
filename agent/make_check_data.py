@@ -16,7 +16,7 @@ These are EVAL questions: fine for checking that ids and masks are right, wrong 
 P1.5 builds the real training set (NQ + HotpotQA train, decision D-09) in this same format.
 
 Usage (training env):
-  .venv-verl/bin/python agent/make_check_data.py --out /data/erfan/search-rl-agent-data/verl_data/p1_3_check --n 64
+  .venv-verl/bin/python agent/make_check_data.py --out /data/erfan/search-agent-rl-data/verl_data/p1_3_check --n 64
 """
 
 import argparse
@@ -34,7 +34,7 @@ AGENT_NAME = "search_r1_agent"
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--gold-dir", default="/data/erfan/search-rl-agent-data/eval")
+    p.add_argument("--gold-dir", default="/data/erfan/search-agent-rl-data/eval")
     p.add_argument("--dataset", default="hotpotqa")
     p.add_argument("--split", default="sub300")
     p.add_argument("--n", type=int, default=64)

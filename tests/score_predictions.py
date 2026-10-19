@@ -23,7 +23,7 @@ a row with both or neither of output/prediction, and questions with no predictio
 
 Usage:
   .venv/bin/python tests/score_predictions.py --preds runs/naive_rag/preds.jsonl --split sub300 --out runs/naive_rag/
-  .venv/bin/python tests/score_predictions.py --make-dummy /data/erfan/search-rl-agent-data/logs/dummy_preds.jsonl --split sub300
+  .venv/bin/python tests/score_predictions.py --make-dummy /data/erfan/search-agent-rl-data/logs/dummy_preds.jsonl --split sub300
 """
 
 import argparse
@@ -35,7 +35,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
 from agent.qa_metrics import aggregate, score_output, score_prediction  # noqa: E402
 
-DEFAULT_GOLD = "/data/erfan/search-rl-agent-data/eval"  # written by make_eval_sets.py
+DEFAULT_GOLD = "/data/erfan/search-agent-rl-data/eval"  # written by make_eval_sets.py
 
 
 def sha256(path):

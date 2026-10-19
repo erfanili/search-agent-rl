@@ -13,19 +13,20 @@
 # Usage (from anywhere; retrieval server must be up: bash scripts/serve_retrieval.sh):
 #   bash scripts/p1_3_rollout_check.sh
 #   MODEL_PATH=/path/to/other/model bash scripts/p1_3_rollout_check.sh
-# Output: /data/erfan/search-rl-agent-data/logs/p1_3_rollout_check_<timestamp>/{train.log,rollouts/,report.html,report.txt}
+# Output: /data/erfan/search-agent-rl-data/logs/p1_3_rollout_check_<timestamp>/{train.log,rollouts/,report.html,report.txt}
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
 
 # ---- settings -----------------------------------------------------------------
 PY=$PWD/.venv-verl/bin/python
-MODEL_PATH=${MODEL_PATH:-/data/erfan/search-rl-agent-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775}
-DATA_DIR=/data/erfan/search-rl-agent-data/verl_data/p1_3_check
-export HF_HOME=${HF_HOME:-/data/erfan/search-rl-agent-data/hf_cache}
-export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/search-rl-agent-data/ray_tmp}
-export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/data/erfan/search-rl-agent-data/vllm_cache}
+MODEL_PATH=${MODEL_PATH:-/data/erfan/search-agent-rl-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775}
+DATA_DIR=/data/erfan/search-agent-rl-data/verl_data/p1_3_check
+export HF_HOME=${HF_HOME:-/data/erfan/search-agent-rl-data/hf_cache}
+export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/search-agent-rl-data/rt}  # short name: Ray AF_UNIX socket paths must be <=107 bytes
+export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/data/erfan/search-agent-rl-data/vllm_cache}
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}   # P2P hangs on this machine (notes/smoke_test.md)
+export VLLM_USE_V1=1   # verl async server needs vLLM V1; unset, vLLM falls back to V0 (engine built off the main thread)
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}  # Ray workers import agent/ from the repo root
 
 TRAIN_BATCH=6          # prompts
@@ -53,7 +54,7 @@ GPUS=$(IFS=,; echo "${CANDIDATES[*]:0:N_GPUS}")
 echo "training GPUs: $GPUS (retrieval server on $RETRIEVAL_GPU)"
 
 STAMP=$(date +%Y%m%d_%H%M%S)
-OUT=/data/erfan/search-rl-agent-data/logs/p1_3_rollout_check_${STAMP}
+OUT=/data/erfan/search-agent-rl-data/logs/p1_3_rollout_check_${STAMP}
 mkdir -p "$OUT/rollouts" "$RAY_TMPDIR"
 
 # ---- 1. contract tests with the real tokenizer ---------------------------------

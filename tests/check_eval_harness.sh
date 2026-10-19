@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # P0.8 done-check: build the frozen eval sets, run the unit tests, score a dummy predictions file.
 # Usage (from anywhere): bash tests/check_eval_harness.sh
-# All data stays under /data/erfan/search-rl-agent-data: eval sets in /data/erfan/search-rl-agent-data/eval, outputs in /data/erfan/search-rl-agent-data/logs/p0_8.
+# All data stays under /data/erfan/search-agent-rl-data: eval sets in /data/erfan/search-agent-rl-data/eval, outputs in /data/erfan/search-agent-rl-data/logs/p0_8.
 set -euo pipefail
 cd "$(dirname "$0")/.."   # repo root
-export HF_HOME=${HF_HOME:-/data/erfan/search-rl-agent-data/hf_cache}   # / is nearly full; keep caches on /data
+export HF_HOME=${HF_HOME:-/data/erfan/search-agent-rl-data/hf_cache}   # / is nearly full; keep caches on /data
 PY=.venv/bin/python       # retrieval/eval env; see notes/environments.md
-GOLD=/data/erfan/search-rl-agent-data/eval
-OUT=/data/erfan/search-rl-agent-data/logs/p0_8
+GOLD=/data/erfan/search-agent-rl-data/eval
+OUT=/data/erfan/search-agent-rl-data/logs/p0_8
 
 [[ -f $GOLD/MANIFEST.json ]] || $PY tests/make_eval_sets.py --out "$GOLD" --subset 300
 $PY -m pytest tests/ -q

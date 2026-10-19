@@ -9,12 +9,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=/data/erfan/search-rl-agent-data/hf_cache
-export VLLM_CACHE_ROOT=/data/erfan/search-rl-agent-data/vllm_cache   # vLLM compile cache, default ~/.cache/vllm
+export HF_HOME=/data/erfan/search-agent-rl-data/hf_cache
+export VLLM_CACHE_ROOT=/data/erfan/search-agent-rl-data/vllm_cache   # vLLM compile cache, default ~/.cache/vllm
 MODEL=${MODEL:-PeterJinGo/SearchR1-nq_hotpotqa_train-qwen2.5-3b-em-grpo}
 SPLIT=${SPLIT:-sub300}
 DATASETS=${DATASETS:-hotpotqa 2wiki musique}
-OUT=/data/erfan/search-rl-agent-data/logs/baseline_searchr1_3b_$(date +%Y%m%d_%H%M%S)
+OUT=/data/erfan/search-agent-rl-data/logs/baseline_searchr1_3b_$(date +%Y%m%d_%H%M%S)
 
 GPU=
 for g in "${GPU_LIST[@]}"; do [[ $g != "$RETRIEVAL_GPU" ]] && { GPU=$g; break; }; done

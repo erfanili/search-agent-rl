@@ -36,7 +36,7 @@ from agent.search_r1_rollout import (  # noqa: E402
 )
 
 DEFAULT_TOKENIZER = (
-    "/data/erfan/search-rl-agent-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775"
+    "/data/erfan/search-agent-rl-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775"
 )
 TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", DEFAULT_TOKENIZER)
 

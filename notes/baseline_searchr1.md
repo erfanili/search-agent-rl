@@ -10,7 +10,7 @@
   - info blocks cut to 500 tokens
   - up to 4 search turns, then a final answer turn
 - **Eval sets:** frozen `sub300` of HotpotQA, 2Wiki and MuSiQue (900 questions).
-- **Run:** 2026-10-19 on 1 GPU, 99 s. Output in `/data/erfan/search-rl-agent-data/logs/baseline_searchr1_3b_20261019_004238/`.
+- **Run:** 2026-10-19 on 1 GPU, 99 s. Output in `/data/erfan/search-agent-rl-data/logs/baseline_searchr1_3b_20261019_004238/`.
 
 ## Results
 

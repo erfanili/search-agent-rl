@@ -11,9 +11,9 @@
 #
 # Usage (from the repo root; no venv activation needed):
 #   bash scripts/p0_7_smoke_grpo_gsm8k.sh
-#   .venv-verl/bin/python scripts/summarize_smoke.py /data/erfan/search-rl-agent-data/logs/p0_7_smoke_<timestamp>
+#   .venv-verl/bin/python scripts/summarize_smoke.py /data/erfan/search-agent-rl-data/logs/p0_7_smoke_<timestamp>
 #
-# Outputs in /data/erfan/search-rl-agent-data/logs/p0_7_smoke_<timestamp>/ (all data stays under /data/erfan/search-rl-agent-data):
+# Outputs in /data/erfan/search-agent-rl-data/logs/p0_7_smoke_<timestamp>/ (all data stays under /data/erfan/search-agent-rl-data):
 #   train.log    verl console output (one "step:N - key:value - ..." line per step)
 #   gpu.csv      nvidia-smi samples every 2 s: true per-GPU memory, including vLLM's reserve
 #   config.txt   every setting below, for the decision log
@@ -24,12 +24,12 @@ source scripts/gpus.sh
 
 # ---- settings (edit here, not in the command) --------------------------------
 PY=$PWD/.venv-verl/bin/python   # training env; see notes/environments.md
-VERL_DIR=${VERL_DIR:-/data/erfan/search-rl-agent-data/src/verl}
-MODEL_PATH=${MODEL_PATH:-/data/erfan/search-rl-agent-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775}
-DATA_DIR=${DATA_DIR:-/data/erfan/search-rl-agent-data/verl_data/gsm8k}
-export HF_HOME=${HF_HOME:-/data/erfan/search-rl-agent-data/hf_cache}       # / is ~99% full: keep caches on /data
-export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/search-rl-agent-data/ray_tmp}  # Ray logs and spill files, same reason
-export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/data/erfan/search-rl-agent-data/vllm_cache}  # vLLM compile cache, default ~/.cache/vllm
+VERL_DIR=${VERL_DIR:-/data/erfan/search-agent-rl-data/src/verl}
+MODEL_PATH=${MODEL_PATH:-/data/erfan/search-agent-rl-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775}
+DATA_DIR=${DATA_DIR:-/data/erfan/search-agent-rl-data/verl_data/gsm8k}
+export HF_HOME=${HF_HOME:-/data/erfan/search-agent-rl-data/hf_cache}       # / is ~99% full: keep caches on /data
+export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/search-agent-rl-data/rt}  # Ray logs and spill files; short name: AF_UNIX socket paths must be <=107 bytes
+export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/data/erfan/search-agent-rl-data/vllm_cache}  # vLLM compile cache, default ~/.cache/vllm
 # GPU-to-GPU (P2P) copies appear to hang on this machine (AMD EPYC, IOMMU on): the first NCCL
 # broadcast never finished and the run died after the 30-min timeout. Route transfers through
 # host memory instead. Check with: bash scripts/nccl_check.sh
@@ -79,7 +79,7 @@ echo "GPUs: $GPUS"
 # -------------------------------------------------------------------------------
 
 STAMP=$(date +%Y%m%d_%H%M%S)
-OUT=/data/erfan/search-rl-agent-data/logs/p0_7_smoke_${STAMP}
+OUT=/data/erfan/search-agent-rl-data/logs/p0_7_smoke_${STAMP}
 mkdir -p "$OUT" "$RAY_TMPDIR"
 export CUDA_VISIBLE_DEVICES=$GPUS
 

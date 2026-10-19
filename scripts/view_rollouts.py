@@ -25,7 +25,7 @@ With --html, writes one page with every episode: env tokens shaded, token bounda
 (with --tokenizer), queries and finish reason per episode. Read a dozen by eye.
 
 Usage (training env, for the tokenizer):
-  .venv-verl/bin/python scripts/view_rollouts.py /data/erfan/search-rl-agent-data/logs/p1_3_.../rollouts \\
+  .venv-verl/bin/python scripts/view_rollouts.py /data/erfan/search-agent-rl-data/logs/p1_3_.../rollouts \\
       --tokenizer /path/to/model --html report.html
 """
 

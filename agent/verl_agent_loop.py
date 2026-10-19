@@ -97,14 +97,25 @@ class SearchR1AgentLoop(AgentLoopBase):
 
     async def run(self, messages: list[dict[str, Any]], sampling_params: dict[str, Any]) -> AgentLoopOutput:
         times = {"generate_sequences": 0.0, "tool_calls": 0.0}  # summed over the episode's turns
-        request_id = uuid4().hex  # same id every turn: verl routes it to the same server (prefix cache)
+        episode_id = uuid4().hex
+        n_calls = 0
         prompt_ids = await self.loop.run_in_executor(None, self._prompt_ids, messages)
         # stop at the end of an action; max_tokens is set by verl's server (max_model_len - context)
         sp = dict(sampling_params, stop=STOP_STRINGS, include_stop_str_in_output=True)
 
         async def generate(context_ids):
+            # Route by episode id, so every turn goes to the same server (prefix cache), but give vLLM a
+            # fresh request id per turn. vLLM 0.8.5 V1 detects stop strings in the frontend and frees the
+            # request in the engine core with an abort sent after the output is returned; reusing the id
+            # can reach the engine before that abort and corrupt its KV block table
+            # (AssertionError in block_pool.cache_full_blocks -> EngineDeadError).
+            nonlocal n_calls
+            n_calls += 1
             t = time.time()
-            out = await self.server_manager.generate(request_id=request_id, prompt_ids=list(context_ids), sampling_params=sp)
+            server = self.server_manager._choose_server(episode_id)
+            out = await server.generate.remote(
+                request_id=f"{episode_id}-{n_calls}", prompt_ids=list(context_ids), sampling_params=sp
+            )
             times["generate_sequences"] += time.time() - t
             return out
 
