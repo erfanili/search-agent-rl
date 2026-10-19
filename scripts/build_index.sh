@@ -12,7 +12,7 @@ FACTORY=${FACTORY:-IVF4096,SQ8}
 OUT=/data/erfan/index_e5_${FACTORY//[^A-Za-z0-9]/_}
 
 # k-means on every GPU in configs/gpus.env; CPU threads pinned to those GPUs' NUMA node(s)
-CPUS=$(cpus_for "$GPUS")
+CPUS=$(cpus_for "$GPUS")yes
 echo "GPUs $GPUS, CPUs $CPUS"
 CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$CPUS" \
     .venv/bin/python retrieval/build_index.py --emb-dir "$EMB" --corpus "$INPUT" --out "$OUT" \

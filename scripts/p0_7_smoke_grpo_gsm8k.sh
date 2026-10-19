@@ -29,6 +29,7 @@ MODEL_PATH=${MODEL_PATH:-/data/erfan/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Ins
 DATA_DIR=${DATA_DIR:-/data/erfan/verl_data/gsm8k}
 export HF_HOME=${HF_HOME:-/data/erfan/hf_cache}       # / is ~99% full: keep caches on /data
 export RAY_TMPDIR=${RAY_TMPDIR:-/data/erfan/ray_tmp}  # Ray logs and spill files, same reason
+export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-/data/erfan/vllm_cache}  # vLLM compile cache, default ~/.cache/vllm
 # GPU-to-GPU (P2P) copies appear to hang on this machine (AMD EPYC, IOMMU on): the first NCCL
 # broadcast never finished and the run died after the 30-min timeout. Route transfers through
 # host memory instead. Check with: bash scripts/nccl_check.sh
