@@ -17,14 +17,15 @@ for g in "${GPU_LIST[@]}"; do
     fi
 done
 
-mkdir -p logs
-nohup bash scripts/p0_7_smoke_grpo_gsm8k.sh > logs/p0_7_launch.log 2>&1 &
+LOGS=/data/erfan/logs   # all run output lives under /data/erfan
+mkdir -p "$LOGS"
+nohup bash scripts/p0_7_smoke_grpo_gsm8k.sh > "$LOGS/p0_7_launch.log" 2>&1 &
 RUN_PID=$!
-echo "smoke test started (pid $RUN_PID); output: logs/p0_7_launch.log"
+echo "smoke test started (pid $RUN_PID); output: $LOGS/p0_7_launch.log"
 echo
-tail -f --pid="$RUN_PID" logs/p0_7_launch.log   # exits when the run does
+tail -f --pid="$RUN_PID" "$LOGS/p0_7_launch.log"   # exits when the run does
 
-OUT=$(ls -dt logs/p0_7_smoke_* | head -1)
+OUT=$(ls -dt "$LOGS"/p0_7_smoke_* | head -1)
 echo
 echo "run finished; summary of $OUT:"
 .venv-verl/bin/python scripts/summarize_smoke.py "$OUT" || true

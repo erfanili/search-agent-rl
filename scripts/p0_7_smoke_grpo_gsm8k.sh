@@ -11,9 +11,9 @@
 #
 # Usage (from the repo root; no venv activation needed):
 #   bash scripts/p0_7_smoke_grpo_gsm8k.sh
-#   .venv-verl/bin/python scripts/summarize_smoke.py logs/p0_7_smoke_<timestamp>
+#   .venv-verl/bin/python scripts/summarize_smoke.py /data/erfan/logs/p0_7_smoke_<timestamp>
 #
-# Outputs in logs/p0_7_smoke_<timestamp>/:
+# Outputs in /data/erfan/logs/p0_7_smoke_<timestamp>/ (all data stays under /data/erfan):
 #   train.log    verl console output (one "step:N - key:value - ..." line per step)
 #   gpu.csv      nvidia-smi samples every 2 s: true per-GPU memory, including vLLM's reserve
 #   config.txt   every setting below, for the decision log
@@ -78,7 +78,7 @@ echo "GPUs: $GPUS"
 # -------------------------------------------------------------------------------
 
 STAMP=$(date +%Y%m%d_%H%M%S)
-OUT=logs/p0_7_smoke_${STAMP}
+OUT=/data/erfan/logs/p0_7_smoke_${STAMP}
 mkdir -p "$OUT" "$RAY_TMPDIR"
 export CUDA_VISIBLE_DEVICES=$GPUS
 
@@ -152,6 +152,7 @@ trap 'kill $SMI_PID 2>/dev/null || true' EXIT
     trainer.total_epochs=1 \
     trainer.total_training_steps=$STEPS \
     trainer.default_local_dir="$OUT/ckpt" \
+    hydra.run.dir="$OUT/hydra" \
     2>&1 | tee "$OUT/train.log"
 
 echo "done: $OUT"

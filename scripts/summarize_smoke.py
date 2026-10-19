@@ -3,7 +3,7 @@
 Summarize a P0.7 smoke run: step time breakdown, GPU memory, and whether reward moved.
 
 Usage:
-  python scripts/summarize_smoke.py logs/p0_7_smoke_<timestamp>
+  .venv-verl/bin/python scripts/summarize_smoke.py /data/erfan/logs/p0_7_smoke_<timestamp>
 
 Reads train.log (verl console lines "step:N - key:value - ...") and gpu.csv (nvidia-smi samples).
 Writes summary.json and summary.md into the same directory and prints the Markdown.
