@@ -1,134 +1,87 @@
 #!/usr/bin/env python
 """
-Build the GRPO training set: NQ train + HotpotQA train, Search-R1's mix (decision D-09).
+Build the GRPO training and validation sets in verl's format (P1.5, decision D-09).
 
-Source: RUC-NLPIR/FlashRAG_datasets, the same preprocessed copies Search-R1 merged
-(scripts/data_process/qa_search_train_merge.py: nq + hotpotqa, train split). That is about
-79k NQ (single-hop) + 90k HotpotQA (two-hop) questions.
+train.parquet  Search-R1's NQ + HotpotQA train mix (PeterJinGo/nq_hotpotqa_train, 169,615 rows:
+               NQ 79,168, HotpotQA 90,447), the data the released Search-R1 checkpoints trained on.
+val.parquet    our frozen eval subsets (default: sub300 of hotpotqa, 2wiki, musique, plus bamboogle),
+               so validation during training uses the same questions as tests/score_predictions.py.
 
-Writes, under --out (verl format, same columns as agent/make_check_data.py):
-  train.parquet    every training question except the held-out ones
-  dev.parquet      --dev-size questions held out from the SAME mix, for choosing checkpoints
-  MANIFEST.json    sizes per source, seed, overlaps removed, sha256 of both files
+Same columns as agent/make_check_data.py (data_source, agent_name, prompt, ability, reward_model,
+extra_info). The prompt is rebuilt with make_question_prompt; the script checks it equals the prompt
+stored in Search-R1's parquet, so the task text is exactly theirs. Search-R1's ids restart per source
+(nq and hotpotqa both have train_0), so extra_info.id is "<source>_<id>".
 
-Why a held-out dev split: checkpoints must be selected on questions that are neither trained on
-nor reported. 2609.28765 selected on its reported eval suite and lists that as a limitation.
-Here: train on train.parquet, pick checkpoints on dev.parquet, report on the frozen eval sets.
-
-Safety check: any training question whose normalized text also appears in the frozen eval sets
-(/data/erfan/eval/*/full.jsonl) is dropped and counted. HotpotQA train and dev are different
-splits, so this should be ~0; the check makes it a measured fact instead of an assumption.
-
-Usage (training env; downloads ~20 MB once):
-  HF_HOME=/data/erfan/hf_cache .venv-verl/bin/python agent/make_train_data.py --out /data/erfan/verl_data/nq_hotpotqa
+Usage (training env; the dataset must be in the HF cache: hf download PeterJinGo/nq_hotpotqa_train --repo-type dataset):
+  .venv-verl/bin/python agent/make_train_data.py --out /data/erfan/search-agent-rl-data/verl_data/nq_hotpotqa
 """
 
 import argparse
-import hashlib
+import glob
 import json
 import os
-import random
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.qa_metrics import normalize_answer  # noqa: E402
+from agent.make_check_data import AGENT_NAME  # noqa: E402
 from agent.search_r1_rollout import make_question_prompt  # noqa: E402
 
-REPO = "RUC-NLPIR/FlashRAG_datasets"
-SOURCES = ("nq", "hotpotqa")
-AGENT_NAME = "search_r1_agent"
+DATA = "/data/erfan/search-agent-rl-data"
+SRC_GLOB = f"{DATA}/hf_cache/hub/datasets--PeterJinGo--nq_hotpotqa_train/snapshots/*/train.parquet"
 
 
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def eval_questions(gold_dir):
-    if not os.path.isdir(gold_dir):
-        sys.exit(f"{gold_dir} not found: build the frozen eval sets first (tests/make_eval_sets.py)")
-    seen = set()
-    for name in sorted(os.listdir(gold_dir)):
-        path = os.path.join(gold_dir, name, "full.jsonl")
-        if os.path.exists(path):
-            with open(path) as f:
-                seen.update(normalize_answer(json.loads(line)["question"]) for line in f if line.strip())
-    return seen
-
-
-def to_row(source, r, i):
+def row(data_source, question, answers, index, qid):
     return {
-        "data_source": source,
+        "data_source": data_source,
         "agent_name": AGENT_NAME,
-        "prompt": [{"role": "user", "content": make_question_prompt(r["question"])}],
+        "prompt": [{"role": "user", "content": make_question_prompt(question)}],
         "ability": "fact-reasoning",
-        "reward_model": {"style": "rule", "ground_truth": {"target": [str(g) for g in r["golden_answers"]]}},
-        "extra_info": {"index": i, "id": str(r["id"]), "question": r["question"], "source": source},
+        "reward_model": {"style": "rule", "ground_truth": {"target": [str(a) for a in answers]}},
+        "extra_info": {"index": index, "id": qid, "question": question},
     }
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--src", default=None, help=f"Search-R1 train.parquet (default: {SRC_GLOB})")
+    p.add_argument("--gold-dir", default=f"{DATA}/eval")
+    p.add_argument("--val-datasets", nargs="+", default=["hotpotqa", "2wiki", "musique", "bamboogle"])
+    p.add_argument("--val-split", default="sub300")
     p.add_argument("--out", required=True)
-    p.add_argument("--gold-dir", default="/data/erfan/eval")
-    p.add_argument("--dev-size", type=int, default=1000, help="held out, split evenly between the sources")
-    p.add_argument("--seed", type=int, default=0)
     a = p.parse_args()
 
     import pandas as pd
-    from datasets import load_dataset
 
-    banned = eval_questions(a.gold_dir)
-    print(f"{len(banned):,} eval questions loaded for the overlap check")
+    src = a.src or (sorted(glob.glob(SRC_GLOB)) or [None])[-1]
+    if not src or not os.path.exists(src):
+        sys.exit(f"Search-R1 train set not found ({SRC_GLOB}); download it first (see --help)")
 
-    rows, stats = [], {}
-    for source in SOURCES:
-        ds = load_dataset(REPO, source, split="train")
-        kept = dropped_overlap = dropped_empty = 0
-        for r in ds:
-            if not r["question"].strip() or not any(str(g).strip() for g in r["golden_answers"]):
-                dropped_empty += 1
-                continue
-            if normalize_answer(r["question"]) in banned:
-                dropped_overlap += 1
-                continue
-            rows.append((source, r))
-            kept += 1
-        stats[source] = {"kept": kept, "dropped_eval_overlap": dropped_overlap, "dropped_empty": dropped_empty}
-        print(f"{source:9s} {kept:7,} kept, {dropped_overlap} overlap with eval sets, {dropped_empty} empty")
+    df = pd.read_parquet(src)
+    rows, mismatched = [], 0
+    for i, r in enumerate(df.itertuples(index=False)):
+        out = row(r.data_source, r.question, list(r.golden_answers), i, f"{r.data_source}_{r.id}")
+        mismatched += out["prompt"][0]["content"] != r.prompt[0]["content"]
+        rows.append(out)
+    if mismatched:
+        sys.exit(f"{mismatched} prompts differ from Search-R1's; make_question_prompt no longer matches their task")
+    train = pd.DataFrame(rows)
 
-    rng = random.Random(a.seed)
-    rng.shuffle(rows)  # mix the sources; verl also shuffles per epoch, this fixes the dev draw
-    per_source = a.dev_size // len(SOURCES)
-    dev_idx, counts = set(), {s: 0 for s in SOURCES}
-    for i, (source, _) in enumerate(rows):
-        if counts[source] < per_source:
-            dev_idx.add(i)
-            counts[source] += 1
-    train = [to_row(s, r, i) for i, (s, r) in enumerate(rows) if i not in dev_idx]
-    dev = [to_row(s, r, i) for i, (s, r) in enumerate(rows) if i in dev_idx]
+    val_rows = []
+    for ds in a.val_datasets:
+        with open(os.path.join(a.gold_dir, ds, f"{a.val_split}.jsonl")) as f:
+            for line in f:
+                r = json.loads(line)
+                val_rows.append(row(ds, r["question"], r["golden_answers"], len(val_rows), r["id"]))
+    val = pd.DataFrame(val_rows)
 
     os.makedirs(a.out, exist_ok=True)
-    paths = {name: os.path.join(a.out, f"{name}.parquet") for name in ("train", "dev")}
-    pd.DataFrame(train).to_parquet(paths["train"])
-    pd.DataFrame(dev).to_parquet(paths["dev"])
-    manifest = {
-        "source": REPO,
-        "sources": stats,
-        "seed": a.seed,
-        "n_train": len(train),
-        "n_dev": len(dev),
-        "dev_per_source": counts,
-        "sha256": {k: sha256(v) for k, v in paths.items()},
-    }
-    with open(os.path.join(a.out, "MANIFEST.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
-    print(f"train {len(train):,}  dev {len(dev):,}  -> {a.out}")
+    train.to_parquet(os.path.join(a.out, "train.parquet"))
+    val.to_parquet(os.path.join(a.out, "val.parquet"))
+    print(f"train: {len(train)} rows {train.data_source.value_counts().to_dict()} (prompts identical to Search-R1's)")
+    print(f"val:   {len(val)} rows {val.data_source.value_counts().to_dict()} ({a.val_split})")
+    print(f"wrote {a.out}/{{train,val}}.parquet")
 
 
 if __name__ == "__main__":
