@@ -4,3 +4,9 @@ __pycache__
 logs/
 outputs/
 
+# Private notes and paper drafts stay local (never committed). New notes are private by default;
+# a note becomes public only by adding a ! line here.
+notes/*
+!notes/results_grpo_3b_60step.md
+!notes/baseline_searchr1.md
+paper/

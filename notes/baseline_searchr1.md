@@ -3,7 +3,7 @@
 **Purpose:** run a published checkpoint through our whole eval pipeline (retrieval server, rollout, `tests/score_predictions.py`) and check that the numbers land near the published ones. It is a harness test, not a result we report.
 
 - **Checkpoint:** `PeterJinGo/SearchR1-nq_hotpotqa_train-qwen2.5-3b-em-grpo` (Qwen2.5-3B base; GRPO on NQ + HotpotQA with an EM reward).
-- **Retrieval:** our e5-base-v2 + IVF4096,SQ8 index, `nprobe=64`, top-3 (D-05).
+- **Retrieval:** our e5-base-v2 + IVF4096,SQ8 index, `nprobe=64`, top-3.
 - **Rollout:** `baselines/searchr1_infer.py` copies Search-R1's prompt and loop:
   - greedy decoding
   - ≤ 500 tokens per turn
@@ -14,7 +14,7 @@
 
 ## Results
 
-Scored with the env-stripping scorer (D-16). The first scoring read env text as model text; it's kept in `scores_v1_nostrip.txt`.
+Scored with the env-stripping scorer (environment text is removed before the answer is parsed). The first scoring read env text as model text; it's kept in `scores_v1_nostrip.txt`.
 
 | dataset | EM | F1 | ACC | abort | searches / question | paper EM, Search-R1-base GRPO 3B |
 |---|---|---|---|---|---|---|
