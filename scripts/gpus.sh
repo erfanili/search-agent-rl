@@ -8,6 +8,8 @@
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../configs/gpus.env
 source "$ROOT/configs/gpus.env"
+# shellcheck source=paths.sh
+source "$ROOT/scripts/paths.sh"   # DATA and hf_snapshot
 
 if [[ ! $GPUS =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     echo "configs/gpus.env: GPUS='$GPUS' must look like 0,1,2,3" >&2

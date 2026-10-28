@@ -9,7 +9,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-DATA=/data/erfan/search-agent-rl-data
 export HF_HOME=$DATA/hf_cache
 export VLLM_CACHE_ROOT=$DATA/vllm_cache
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}

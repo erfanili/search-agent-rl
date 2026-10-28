@@ -2,6 +2,8 @@
 __pycache__
 .venv*
 logs/
+/data/
+configs/paths.local.env
 outputs/
 
 # Private notes and paper drafts stay local (never committed). New notes are private by default;

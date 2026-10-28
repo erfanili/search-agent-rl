@@ -5,9 +5,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=${HF_HOME:-/data/erfan/search-agent-rl-data/hf_cache}   # keep model downloads under /data/erfan/search-agent-rl-data, not ~/.cache
-INPUT=/data/erfan/search-agent-rl-data/corpus/data/psgs_w100/no_embeddings
-OUT=/data/erfan/search-agent-rl-data/emb_e5
+export HF_HOME=${HF_HOME:-$DATA/hf_cache}   # keep model downloads under $DATA, not ~/.cache
+INPUT=$DATA/corpus/data/psgs_w100/no_embeddings
+OUT=$DATA/emb_e5
 mkdir -p "$OUT/logs"
 
 for r in "${!GPU_LIST[@]}"; do

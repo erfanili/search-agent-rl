@@ -2,7 +2,7 @@
 
 Usage:
     python retrieval/inspect_corpus.py \
-        --root /data/erfan/search-agent-rl-data/corpus/data/psgs_w100/no_embeddings \
+        --root $DATA_ROOT/corpus/data/psgs_w100/no_embeddings \
         --out notes/corpus_inspection.json
 
 Reads parquet metadata, the `id` column of every file (about 170 MB as int64),
@@ -14,11 +14,15 @@ import json
 import os
 import random
 import statistics
+import sys
 from collections import defaultdict
 
 import numpy as np
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
+from agent.paths import DATA  # noqa: E402
 
 
 def summarize(values):
@@ -41,7 +45,7 @@ def truncate(row, n_chars):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="/data/erfan/search-agent-rl-data/corpus/data/psgs_w100/no_embeddings")
+    ap.add_argument("--root", default=f"{DATA}/corpus/data/psgs_w100/no_embeddings")
     ap.add_argument("--out", default="corpus_inspection.json")
     ap.add_argument("--sample", type=int, default=1000, help="rows drawn uniformly from the whole corpus")
     ap.add_argument("--n_examples", type=int, default=5)

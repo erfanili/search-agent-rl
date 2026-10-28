@@ -22,9 +22,13 @@ import argparse
 import json
 import os
 import re
+import sys
 import time
 
 import requests
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
+from agent.paths import DATA  # noqa: E402
 
 INSTRUCTION = (
     "Answer the given question. "
@@ -90,7 +94,7 @@ def truncate_tokens(tokenizer, text, n):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True)
-    p.add_argument("--gold-dir", default="/data/erfan/search-agent-rl-data/eval")
+    p.add_argument("--gold-dir", default=f"{DATA}/eval")
     p.add_argument("--split", default="sub300")
     p.add_argument("--datasets", nargs="+", default=["hotpotqa", "2wiki", "musique"])
     p.add_argument("--limit", type=int, default=0, help="first N questions per dataset (0 = all); for quick debugging")

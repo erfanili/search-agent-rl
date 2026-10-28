@@ -33,9 +33,8 @@ if [[ $METHOD == lora ]]; then
     exit 1
 fi
 
-DATA=/data/erfan/search-agent-rl-data
 PY=$PWD/.venv-verl/bin/python
-MODEL_PATH=${MODEL_PATH:-$(ls -d $DATA/hf_cache/hub/models--Qwen--Qwen2.5-3B/snapshots/* 2>/dev/null | tail -1)}
+MODEL_PATH=${MODEL_PATH:-$(hf_snapshot models Qwen/Qwen2.5-3B)}
 MODEL_PATH=${MODEL_PATH%/}   # verl's copy_to_local rejects a trailing slash
 DATA_DIR=${DATA_DIR:-$DATA/verl_data/nq_hotpotqa}
 export HF_HOME=${HF_HOME:-$DATA/hf_cache}

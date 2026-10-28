@@ -29,15 +29,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agent.paths import hf_snapshot  # noqa: E402
 from agent.qa_metrics import SEARCH_R1_INVALID, score_output, strip_environment_text  # noqa: E402
 from agent.reward import compute_score  # noqa: E402
 from agent.search_r1_rollout import (  # noqa: E402
     RolloutConfig, cut_at_action, information_ids, make_question_prompt, prompt_ids_for, run_episode,
 )
 
-DEFAULT_TOKENIZER = (
-    "/data/erfan/search-agent-rl-data/hf_cache/hub/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775"
-)
+DEFAULT_TOKENIZER = hf_snapshot("models", "Qwen/Qwen2.5-0.5B-Instruct") or "Qwen/Qwen2.5-0.5B-Instruct"
 TOKENIZER_PATH = os.environ.get("TOKENIZER_PATH", DEFAULT_TOKENIZER)
 
 

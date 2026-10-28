@@ -6,7 +6,7 @@ Source: RUC-NLPIR/FlashRAG_datasets on Hugging Face, the preprocessed versions S
 and most follow-up papers evaluate on. Test labels are hidden for HotpotQA / 2Wiki / MuSiQue,
 so the dev split is the evaluation set; Bamboogle only has its 125-question test split.
 
-Writes, under --out (default /data/erfan/search-agent-rl-data/eval/; all data lives under /data/erfan/search-agent-rl-data):
+Writes, under --out (default $DATA_ROOT/eval/; all data lives under $DATA_ROOT):
   <name>/full.jsonl        every dev row: {"id", "question", "golden_answers"}
   <name>/sub<N>.jsonl      fixed random subset of N rows (seed 0, kept in original order),
                            used for fast iteration; full.jsonl is for final numbers
@@ -25,6 +25,10 @@ import hashlib
 import json
 import os
 import random
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
+from agent.paths import DATA  # noqa: E402
 
 SETS = {  # short name -> (FlashRAG config, split)
     "hotpotqa": ("hotpotqa", "dev"),
@@ -33,7 +37,7 @@ SETS = {  # short name -> (FlashRAG config, split)
     "bamboogle": ("bamboogle", "test"),
 }
 REPO = "RUC-NLPIR/FlashRAG_datasets"
-DEFAULT_OUT = "/data/erfan/search-agent-rl-data/eval"
+DEFAULT_OUT = f"{DATA}/eval"
 
 
 def sha256(path):

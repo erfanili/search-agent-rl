@@ -1,6 +1,6 @@
 # Results: GRPO, Qwen2.5-3B base, 60 steps (2026-10-19/20)
 
-**Run:** `/data/erfan/search-agent-rl-data/logs/grpo_qwen2.5-3b_full_20261019_183501/`. It finished in 8 h 46 min of training (60 steps, 526 s/step on average), plus four validation passes. The one checkpoint kept is `ckpt/global_step_60`, about 36 GB.
+**Run:** `$DATA_ROOT/logs/grpo_qwen2.5-3b_full_20261019_183501/`. It finished in 8 h 46 min of training (60 steps, 526 s/step on average), plus four validation passes. The one checkpoint kept is `ckpt/global_step_60`, about 36 GB.
 
 **Command:**
 ```bash
@@ -29,7 +29,7 @@ Two things to keep in mind when reading this table:
 
 ## Step 60 through the Search-R1 baseline harness (exact comparison)
 
-`scripts/eval_checkpoint.sh` ran the merged step-60 checkpoint through `baselines/searchr1_infer.py` and `tests/score_predictions.py`, the same code path as the Search-R1 row. Output: `/data/erfan/search-agent-rl-data/logs/eval_grpo_qwen2.5-3b_full_20261019_183501_global_step_60_20261020_104937/`.
+`scripts/eval_checkpoint.sh` ran the merged step-60 checkpoint through `baselines/searchr1_infer.py` and `tests/score_predictions.py`, the same code path as the Search-R1 row. Output: `$DATA_ROOT/logs/eval_grpo_qwen2.5-3b_full_20261019_183501_global_step_60_20261020_104937/`.
 
 | | ours EM | Search-R1-3B EM | both right | only ours | only Search-R1 | paired sign test p | query = question verbatim, ours / SR1 |
 |---|---|---|---|---|---|---|---|

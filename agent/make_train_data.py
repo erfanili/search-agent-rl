@@ -12,8 +12,8 @@ extra_info). The prompt is rebuilt with make_question_prompt; the script checks 
 stored in Search-R1's parquet, so the task text is exactly theirs. Search-R1's ids restart per source
 (nq and hotpotqa both have train_0), so extra_info.id is "<source>_<id>".
 
-Usage (training env; the dataset must be in the HF cache: hf download PeterJinGo/nq_hotpotqa_train --repo-type dataset):
-  .venv-verl/bin/python agent/make_train_data.py --out /data/erfan/search-agent-rl-data/verl_data/nq_hotpotqa
+Usage (training env; the dataset must be in the HF cache: bash scripts/download_models.sh core):
+  .venv-verl/bin/python agent/make_train_data.py --out $DATA_ROOT/verl_data/nq_hotpotqa
 """
 
 import argparse
@@ -26,9 +26,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.make_check_data import AGENT_NAME  # noqa: E402
+from agent.paths import DATA  # noqa: E402
 from agent.search_r1_rollout import make_question_prompt  # noqa: E402
 
-DATA = "/data/erfan/search-agent-rl-data"
 SRC_GLOB = f"{DATA}/hf_cache/hub/datasets--PeterJinGo--nq_hotpotqa_train/snapshots/*/train.parquet"
 
 
