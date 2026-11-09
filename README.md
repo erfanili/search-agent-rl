@@ -74,7 +74,7 @@ bash scripts/run_baseline_searchr1.sh                             # released Sea
 .venv-verl/bin/python agent/make_train_data.py --out $DATA_ROOT/verl_data/nq_hotpotqa
 TRAIN_BATCH=64 MINI_BATCH=32 TOTAL_STEPS=60 WARMUP_RATIO=0.1 TEST_FREQ=20 SAVE_FREQ=20 CKPT_KEEP=1 \
   bash scripts/train_grpo_3b.sh full                              # 60-step GRPO run, about 9 h on 5 × A5000
-bash scripts/eval_checkpoint.sh $DATA_ROOT/logs/<run>/ckpt/global_step_60   # merge FSDP shards, evaluate, list misses
+bash scripts/eval_checkpoint.sh $DATA_ROOT/logs/<run>/ckpt/global_step_60   # merge FSDP shards, evaluate
 ```
 
 `DRY_RUN=1 bash scripts/train_grpo_3b.sh full` prints the resolved verl config without starting anything. Search-R1's full recipe is `TRAIN_BATCH=512 MINI_BATCH=256 TOTAL_STEPS=1005 MAX_RESPONSE=3072`.

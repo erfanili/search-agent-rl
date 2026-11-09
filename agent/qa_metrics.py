@@ -103,6 +103,23 @@ def count_searches(text):
     return len(SEARCH_RE.findall(text or ""))
 
 
+def distinct_searches(text):
+    """Number of different queries (after answer normalization) in model-written text."""
+    return len({normalize_answer(q) for q in SEARCH_RE.findall(text or "")})
+
+
+def answer_in_text(text, golds):
+    """1 if some normalized gold answer appears in text as whole words."""
+    t = f" {normalize_answer(text or '')} "
+    return float(any(g and f" {g} " in t for g in map(normalize_answer, _as_list(golds))))
+
+
+def answer_in_information(output, golds):
+    """1 if some normalized gold answer appears in a retrieved <information> block: retrieval found the
+    evidence, whatever the final answer says. Reads environment text, so pass the raw trajectory."""
+    return answer_in_text(" ".join(INFO_RE.findall(output or "")), golds)
+
+
 def _scores(answer, golds):
     if answer is None:
         return {"em": 0.0, "f1": 0.0, "acc": 0.0}

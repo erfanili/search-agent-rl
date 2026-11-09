@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Evaluate a trained checkpoint with the same harness as the Search-R1 baseline (baselines/searchr1_infer.py
-# + tests/score_predictions.py), so its numbers sit in the same table as P1.2. Then list Bamboogle misses.
+# + tests/score_predictions.py), so its numbers sit in the same table as P1.2.
 #   bash scripts/eval_checkpoint.sh <run_dir>/ckpt/global_step_60       # verl FSDP checkpoint: merged to HF first
 #   bash scripts/eval_checkpoint.sh /path/to/hf_model                   # any HF model dir or hub id
 #   DATASETS=bamboogle bash scripts/eval_checkpoint.sh ...              # one set only (Bamboogle: ~1 min)
@@ -9,8 +9,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=$DATA/hf_cache
-export VLLM_CACHE_ROOT=$DATA/vllm_cache
 export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}
 SRC=${1:?usage: eval_checkpoint.sh <ckpt/global_step_N | hf_model>}
 SRC=${SRC%/}
@@ -34,10 +32,9 @@ else
 fi
 OUT=$DATA/logs/eval_${TAG}_$(date +%Y%m%d_%H%M%S)
 
-GPU=
-for g in "${GPU_LIST[@]}"; do [[ $g != "$RETRIEVAL_GPU" ]] && { GPU=$g; break; }; done
-[[ -n $GPU ]] || { echo "no GPU in configs/gpus.env besides RETRIEVAL_GPU=$RETRIEVAL_GPU"; exit 1; }
-curl -sf localhost:8000/health >/dev/null || { echo "retrieval server not up; run: bash scripts/serve_retrieval.sh"; exit 1; }
+GPU=${WORK_GPUS[0]:-}
+[[ -n $GPU ]] || { echo "no GPU in configs/gpus.env besides RETRIEVAL_GPU=$RETRIEVAL_GPU" >&2; exit 1; }
+require_retrieval_server
 
 mkdir -p "$OUT"
 echo "GPU $GPU, model $MODEL, $SPLIT [$DATASETS], output $OUT"
@@ -47,7 +44,3 @@ CUDA_VISIBLE_DEVICES=$GPU taskset -c "$(cpus_for "$GPU")" \
 .venv/bin/python tests/score_predictions.py --preds "$OUT/preds.jsonl" --split "$SPLIT" --datasets $DATASETS \
     --out "$OUT/scored" | tee "$OUT/scores.txt"
 
-if [[ " $DATASETS " == *" bamboogle "* ]]; then
-    .venv/bin/python scripts/show_misses.py "$OUT/scored/per_example.jsonl" --dataset bamboogle \
-        | tee "$OUT/bamboogle_misses.txt"
-fi

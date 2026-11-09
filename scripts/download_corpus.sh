@@ -8,7 +8,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/paths.sh
-export HF_HOME=${HF_HOME:-$DATA/hf_cache}
 HF=${HF:-.venv/bin/hf}
 OUT=$DATA/corpus
 

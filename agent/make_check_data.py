@@ -8,12 +8,12 @@ train.parquet and val.parquet with the columns verl's RLHFDataset and our agent 
   data_source   "hotpotqa"                      -> reward function argument, metric grouping
   agent_name    "search_r1_agent"               -> which agent loop runs the row (configs/agent_loop.yaml)
   prompt        [{"role": "user", "content": Search-R1 instruction + question}]
-  ability       "multihop_qa"
+  ability       "fact-reasoning"                (Search-R1's value; nothing reads it)
   reward_model  {"style": "rule", "ground_truth": {"target": [gold answers]}}
   extra_info    {"index", "id", "question"}
 
 These are EVAL questions: fine for checking that ids and masks are right, wrong for training.
-P1.5 builds the real training set (NQ + HotpotQA train, decision D-09) in this same format.
+agent/make_train_data.py builds the real training set (NQ + HotpotQA train, D-09) with the same row().
 
 Usage (training env):
   .venv-verl/bin/python agent/make_check_data.py --out $DATA_ROOT/verl_data/p1_3_check --n 64
@@ -28,9 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.paths import DATA  # noqa: E402
-from agent.search_r1_rollout import make_question_prompt  # noqa: E402
-
-AGENT_NAME = "search_r1_agent"
+from agent.make_train_data import row  # noqa: E402
 
 
 def main():
@@ -50,14 +48,7 @@ def main():
             if i >= a.n:
                 break
             r = json.loads(line)
-            rows.append({
-                "data_source": a.dataset,
-                "agent_name": AGENT_NAME,
-                "prompt": [{"role": "user", "content": make_question_prompt(r["question"])}],
-                "ability": "multihop_qa",
-                "reward_model": {"style": "rule", "ground_truth": {"target": list(r["golden_answers"])}},
-                "extra_info": {"index": i, "id": r["id"], "question": r["question"]},
-            })
+            rows.append(row(a.dataset, r["question"], r["golden_answers"], i, r["id"]))
     os.makedirs(a.out, exist_ok=True)
     df = pd.DataFrame(rows)
     for name in ("train", "val"):

@@ -4,22 +4,19 @@
 #   bash scripts/run_baseline_searchr1.sh            # all 900 questions
 #   LIMIT=20 bash scripts/run_baseline_searchr1.sh   # first 20 per dataset, quick check
 # Needs the retrieval server up (bash scripts/serve_retrieval.sh). Runs on one GPU from configs/gpus.env,
-# not the retrieval one; sharing a GPU with the index build is fine (vLLM takes GPU_MEM of the card).
+# not the retrieval one (vLLM takes GPU_MEM of the card).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=$DATA/hf_cache
-export VLLM_CACHE_ROOT=$DATA/vllm_cache   # vLLM compile cache, default ~/.cache/vllm
 MODEL=${MODEL:-PeterJinGo/SearchR1-nq_hotpotqa_train-qwen2.5-3b-em-grpo}
 SPLIT=${SPLIT:-sub300}
 DATASETS=${DATASETS:-hotpotqa 2wiki musique}
 OUT=$DATA/logs/baseline_searchr1_3b_$(date +%Y%m%d_%H%M%S)
 
-GPU=
-for g in "${GPU_LIST[@]}"; do [[ $g != "$RETRIEVAL_GPU" ]] && { GPU=$g; break; }; done
-[[ -n $GPU ]] || { echo "no GPU in configs/gpus.env besides RETRIEVAL_GPU=$RETRIEVAL_GPU"; exit 1; }
-curl -sf localhost:8000/health >/dev/null || { echo "retrieval server not up; run: bash scripts/serve_retrieval.sh"; exit 1; }
+GPU=${WORK_GPUS[0]:-}
+[[ -n $GPU ]] || { echo "no GPU in configs/gpus.env besides RETRIEVAL_GPU=$RETRIEVAL_GPU" >&2; exit 1; }
+require_retrieval_server
 
 mkdir -p "$OUT"
 echo "GPU $GPU, model $MODEL, $SPLIT [$DATASETS], output $OUT"

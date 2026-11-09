@@ -4,7 +4,8 @@ Run a Search-R1 checkpoint on the frozen eval sets and write predictions for tes
 
 Runs in .venv-verl (vLLM). Talks to the retrieval server over HTTP, so it imports nothing from retrieval/.
 
-The rollout copies Search-R1 (search_r1/llm_agent/generation.py, infer.py) so the numbers are comparable:
+The rollout copies Search-R1 and shares its prompt, tags and passage format with agent/search_r1_rollout.py,
+so the numbers are comparable with Search-R1 and with our trained agents. Search-R1's search_r1/llm_agent/generation.py and infer.py:
   prompt      Search-R1's instruction + "Question: ...?", through the tokenizer's chat template
   one turn    greedy generation until </search> or </answer> (or --max-turn-tokens)
   search      first <search>...</search> in the turn -> POST /retrieve, top-k docs appended as
@@ -21,7 +22,6 @@ Usage: bash scripts/run_baseline_searchr1.sh
 import argparse
 import json
 import os
-import re
 import sys
 import time
 
@@ -29,22 +29,8 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
 from agent.paths import DATA  # noqa: E402
-
-INSTRUCTION = (
-    "Answer the given question. "
-    "You must conduct reasoning inside <think> and </think> first every time you get new information. "
-    "After reasoning, if you find you lack some knowledge, you can call a search engine by <search> query </search> "
-    "and it will return the top searched results between <information> and </information>. "
-    "You can search as many times as your want. "
-    "If you find no further external knowledge needed, you can directly provide the answer inside <answer> and </answer>, "
-    "without detailed illustrations. For example, <answer> Beijing </answer>. Question: {question}\n"
-)
-INVALID = (
-    "\nMy previous action is invalid. "
-    "If I want to search, I should put the query between <search> and </search>. "
-    "If I want to give the final answer, I should put the answer between <answer> and </answer>. Let me try again.\n"
-)
-ACTION_RE = re.compile(r"<(search|answer)>(.*?)</\1>", re.DOTALL)
+from agent.qa_metrics import SEARCH_R1_INVALID  # noqa: E402
+from agent.search_r1_rollout import ACTION_RE, STOP_STRINGS, make_question_prompt, passages_to_string  # noqa: E402
 
 
 def load_questions(gold_dir, split, datasets, limit):
@@ -60,21 +46,10 @@ def load_questions(gold_dir, split, datasets, limit):
 
 
 def make_prompt(tokenizer, question):
-    q = question.strip()
-    if not q.endswith("?"):
-        q += "?"
-    text = INSTRUCTION.format(question=q)
+    text = make_question_prompt(question)
     if tokenizer.chat_template:
         text = tokenizer.apply_chat_template([{"role": "user", "content": text}], add_generation_prompt=True, tokenize=False)
     return text
-
-
-def passages_to_string(hits):
-    out = ""
-    for i, h in enumerate(hits):
-        lines = h["document"]["contents"].split("\n")
-        out += f"Doc {i + 1}(Title: {lines[0]}) {chr(10).join(lines[1:])}\n"
-    return out
 
 
 def retrieve(url, queries, topk, batch=256):
@@ -116,7 +91,7 @@ def main():
     llm = LLM(model=a.model, dtype="bfloat16", gpu_memory_utilization=a.gpu_mem, max_model_len=a.max_model_len,
               enable_prefix_caching=True, seed=0)
     tok = llm.get_tokenizer()
-    sp = SamplingParams(temperature=0.0, max_tokens=a.max_turn_tokens, stop=["</search>", "</answer>"],
+    sp = SamplingParams(temperature=0.0, max_tokens=a.max_turn_tokens, stop=STOP_STRINGS,
                         include_stop_str_in_output=True)
 
     rows = load_questions(a.gold_dir, a.split, a.datasets, a.limit)
@@ -152,7 +127,7 @@ def main():
                 r["output"] += text
                 r["finish"] = "turn_budget"
             else:
-                r["output"] += text + INVALID
+                r["output"] += text + SEARCH_R1_INVALID
                 still.append(i)
 
         if searches:

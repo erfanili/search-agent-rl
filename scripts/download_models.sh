@@ -8,7 +8,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/paths.sh
-export HF_HOME=${HF_HOME:-$DATA/hf_cache}
 HF=${HF:-.venv/bin/hf}
 WHAT=${1:-all}
 [[ $WHAT == all || $WHAT == core ]] || { echo "usage: bash scripts/download_models.sh [all|core]" >&2; exit 1; }

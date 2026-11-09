@@ -5,7 +5,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source scripts/gpus.sh
-export HF_HOME=${HF_HOME:-$DATA/hf_cache}   # keep model downloads under $DATA, not ~/.cache
 INPUT=$DATA/corpus/data/psgs_w100/no_embeddings
 EMB=$DATA/emb_e5
 FACTORY=${FACTORY:-IVF4096,SQ8}

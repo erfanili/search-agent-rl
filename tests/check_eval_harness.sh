@@ -5,7 +5,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."   # repo root
 source scripts/paths.sh
-export HF_HOME=${HF_HOME:-$DATA/hf_cache}   # / is nearly full; keep caches on /data
 PY=.venv/bin/python       # retrieval/eval env; see notes/environments.md
 GOLD=$DATA/eval
 OUT=$DATA/logs/p0_8

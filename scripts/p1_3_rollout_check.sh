@@ -22,12 +22,7 @@ source scripts/gpus.sh
 PY=$PWD/.venv-verl/bin/python
 MODEL_PATH=${MODEL_PATH:-$(hf_snapshot models Qwen/Qwen2.5-0.5B-Instruct)}
 DATA_DIR=$DATA/verl_data/p1_3_check
-export HF_HOME=${HF_HOME:-$DATA/hf_cache}
-export RAY_TMPDIR=${RAY_TMPDIR:-$DATA/rt}  # short name: Ray AF_UNIX socket paths must be <=107 bytes
-export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-$DATA/vllm_cache}
-export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}   # P2P hangs on this machine (notes/smoke_test.md)
-export VLLM_USE_V1=1   # verl async server needs vLLM V1; unset, vLLM falls back to V0 (engine built off the main thread)
-export PYTHONPATH=$PWD${PYTHONPATH:+:$PYTHONPATH}  # Ray workers import agent/ from the repo root
+verl_env
 
 TRAIN_BATCH=6          # prompts
 ROLLOUT_N=4            # samples per prompt -> 24 episodes: splits evenly over 1-4 GPUs and 8 agent workers
@@ -40,22 +35,20 @@ AGENT_WORKERS=8
 # -------------------------------------------------------------------------------
 
 # ---- retrieval server must be up, and training stays off its GPU -------------
-curl -sf localhost:8000/health >/dev/null || { echo "retrieval server not up: bash scripts/serve_retrieval.sh" >&2; exit 1; }
-CANDIDATES=()
-for g in "${GPU_LIST[@]}"; do [[ $g == "$RETRIEVAL_GPU" ]] || CANDIDATES+=("$g"); done
+require_retrieval_server
 fits() {
     local k=$1
     (( (TRAIN_BATCH * ROLLOUT_N) % k == 0 && (MINI_BATCH * ROLLOUT_N / k) % MICRO_PER_GPU == 0 ))
 }
 N_GPUS=0
-for (( k=${#CANDIDATES[@]}; k>=1; k-- )); do if fits "$k"; then N_GPUS=$k; break; fi; done
-(( N_GPUS > 0 )) || { echo "no usable GPU count from: ${CANDIDATES[*]:-none}" >&2; exit 1; }
-GPUS=$(IFS=,; echo "${CANDIDATES[*]:0:N_GPUS}")
+for (( k=${#WORK_GPUS[@]}; k>=1; k-- )); do if fits "$k"; then N_GPUS=$k; break; fi; done
+(( N_GPUS > 0 )) || { echo "no usable GPU count from: ${WORK_GPUS[*]:-none}" >&2; exit 1; }
+GPUS=$(IFS=,; echo "${WORK_GPUS[*]:0:N_GPUS}")
 echo "training GPUs: $GPUS (retrieval server on $RETRIEVAL_GPU)"
 
 STAMP=$(date +%Y%m%d_%H%M%S)
 OUT=$DATA/logs/p1_3_rollout_check_${STAMP}
-mkdir -p "$OUT/rollouts" "$RAY_TMPDIR"
+mkdir -p "$OUT/rollouts"
 
 # ---- 1. contract tests with the real tokenizer ---------------------------------
 echo "== 1. contract tests"

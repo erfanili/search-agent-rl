@@ -25,14 +25,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent.make_check_data import AGENT_NAME  # noqa: E402
 from agent.paths import DATA  # noqa: E402
 from agent.search_r1_rollout import make_question_prompt  # noqa: E402
 
+AGENT_NAME = "search_r1_agent"   # configs/agent_loop.yaml
 SRC_GLOB = f"{DATA}/hf_cache/hub/datasets--PeterJinGo--nq_hotpotqa_train/snapshots/*/train.parquet"
 
 
 def row(data_source, question, answers, index, qid):
+    """One verl row; agent/make_check_data.py uses it too."""
     return {
         "data_source": data_source,
         "agent_name": AGENT_NAME,

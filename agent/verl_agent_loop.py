@@ -104,11 +104,9 @@ class SearchR1AgentLoop(AgentLoopBase):
         sp = dict(sampling_params, stop=STOP_STRINGS, include_stop_str_in_output=True)
 
         async def generate(context_ids):
-            # Route by episode id, so every turn goes to the same server (prefix cache), but give vLLM a
-            # fresh request id per turn. vLLM 0.8.5 V1 detects stop strings in the frontend and frees the
-            # request in the engine core with an abort sent after the output is returned; reusing the id
-            # can reach the engine before that abort and corrupt its KV block table
-            # (AssertionError in block_pool.cache_full_blocks -> EngineDeadError).
+            # Same server for every turn of an episode (prefix cache), but a fresh vLLM request id per
+            # turn: vLLM 0.8.5 V1 frees a stop-string request with a late abort, and a reused id can
+            # race it and corrupt the KV cache (notes/p1.3_rollout_contract.md).
             nonlocal n_calls
             n_calls += 1
             t = time.time()
