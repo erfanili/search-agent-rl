@@ -12,8 +12,14 @@ so the numbers are comparable with Search-R1 and with our trained agents. Search
               "\\n\\n<information>Doc 1(Title: T) text\\n...</information>\\n\\n"
   invalid     a turn with neither tag gets Search-R1's "My previous action is invalid..." message
   budget      after --max-turns search turns, one last turn whose searches are not executed
+  depth       --depth-policy exact:k / min:k forces the action tags, as agent/search_r1_rollout.py does in
+              training: a forced turn generates until the policy opens a tag (or --max-turn-tokens), the
+              script writes <search> while fewer than k searches are done (exact:k: <answer> after), and
+              the policy writes the query or answer up to its closing tag. exact:k = exactly k searches.
 
-Output (one line per question): {"dataset", "id", "output", "n_turns", "finish"} where "output" is
+Output (one line per question): {"dataset", "id", "output", "n_turns", "n_search", "n_forced", "n_overridden",
+"n_close_appended", "finish", "depth_policy"} where n_overridden counts forced turns in which the policy had
+written the other tag or none, and "output" is
 everything after the prompt (model text + information blocks); score it with score_predictions.py.
 
 Usage: bash scripts/run_baseline_searchr1.sh
@@ -30,7 +36,10 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # repo root, for agent/
 from agent.paths import DATA  # noqa: E402
 from agent.qa_metrics import SEARCH_R1_INVALID  # noqa: E402
-from agent.search_r1_rollout import ACTION_RE, STOP_STRINGS, make_question_prompt, passages_to_string  # noqa: E402
+from agent.search_r1_rollout import (  # noqa: E402
+    ACTION_RE, OPEN_STOP_STRINGS, OPEN_TAG_RE, STOP_STRINGS, forced_action, make_question_prompt, parse_depth_policy,
+    passages_to_string,
+)
 
 
 def load_questions(gold_dir, split, datasets, limit):
@@ -43,6 +52,16 @@ def load_questions(gold_dir, split, datasets, limit):
                 r = json.loads(line)
                 rows.append({"dataset": name, "id": r["id"], "question": r["question"]})
     return rows
+
+
+def load_parquet_questions(path, limit):
+    """Questions from a verl parquet (agent/make_train_data.py): id = extra_info.id, dataset = data_source."""
+    import pandas as pd
+
+    df = pd.read_parquet(path, columns=["data_source", "extra_info"])
+    if limit:
+        df = df.iloc[:limit]
+    return [{"dataset": str(ds), "id": e["id"], "question": e["question"]} for ds, e in zip(df.data_source, df.extra_info)]
 
 
 def make_prompt(tokenizer, question):
@@ -66,6 +85,41 @@ def truncate_tokens(tokenizer, text, n):
     return text if len(ids) <= n else tokenizer.decode(ids[:n])
 
 
+def forced_turns(llm, rows, idx, forced, sampling, searches):
+    """One forced turn for rows idx (forced[i] = "search" / "answer"), in two batched generate calls.
+    Part 1 runs until the policy opens a tag; its tag is dropped and the forced one written. Part 2 runs
+    to the forced closing tag; if --max-turn-tokens cuts it off, the closing tag is appended (counted)
+    so the episode keeps exactly k searches. Forced searches are queued in `searches`."""
+    if not idx:
+        return
+    outs = llm.generate([rows[i]["prompt"] + rows[i]["output"] for i in idx], sampling(OPEN_STOP_STRINGS), use_tqdm=False)
+    for i, o in zip(idx, outs):
+        text = o.outputs[0].text
+        m = OPEN_TAG_RE.search(text)
+        rows[i]["output"] += (text[: m.start()] if m else text) + f"<{forced[i]}>"
+        rows[i]["n_turns"] += 1
+        rows[i]["n_forced"] += 1
+        rows[i]["n_overridden"] += (m.group(1) if m else None) != forced[i]
+    for kind in ("search", "answer"):
+        sub = [i for i in idx if forced[i] == kind]
+        if not sub:
+            continue
+        close = f"</{kind}>"
+        outs = llm.generate([rows[i]["prompt"] + rows[i]["output"] for i in sub], sampling([close]), use_tqdm=False)
+        for i, o in zip(sub, outs):
+            text = o.outputs[0].text
+            if close in text:
+                text = text[: text.index(close) + len(close)]
+            else:
+                text += close
+                rows[i]["n_close_appended"] += 1
+            rows[i]["output"] += text
+            if kind == "answer":
+                rows[i]["finish"] = "answer"
+            else:
+                searches.append((i, text[: -len(close)].strip()))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True)
@@ -73,15 +127,21 @@ def main():
     p.add_argument("--split", default="sub300")
     p.add_argument("--datasets", nargs="+", default=["hotpotqa", "2wiki", "musique"])
     p.add_argument("--limit", type=int, default=0, help="first N questions per dataset (0 = all); for quick debugging")
+    p.add_argument("--questions-parquet", default=None,
+                   help="read questions from a verl parquet instead of --gold-dir (training-data labels; --limit = first N rows)")
     p.add_argument("--url", default="http://127.0.0.1:8000")
     p.add_argument("--topk", type=int, default=3)
     p.add_argument("--max-turns", type=int, default=4)
+    p.add_argument("--depth-policy", default="free", help="free | exact:k | min:k (k <= --max-turns)")
     p.add_argument("--max-turn-tokens", type=int, default=500, help="Search-R1 max_response_length")
     p.add_argument("--max-obs-tokens", type=int, default=500, help="Search-R1 max_obs_length")
     p.add_argument("--max-model-len", type=int, default=8192)
     p.add_argument("--gpu-mem", type=float, default=0.5)
     p.add_argument("--out", required=True, help="predictions JSONL")
     a = p.parse_args()
+    mode, k = parse_depth_policy(a.depth_policy)
+    if mode != "free" and k > a.max_turns:
+        p.error(f"--depth-policy {a.depth_policy} needs --max-turns >= {k}")
 
     from vllm import LLM, SamplingParams
 
@@ -91,12 +151,19 @@ def main():
     llm = LLM(model=a.model, dtype="bfloat16", gpu_memory_utilization=a.gpu_mem, max_model_len=a.max_model_len,
               enable_prefix_caching=True, seed=0)
     tok = llm.get_tokenizer()
-    sp = SamplingParams(temperature=0.0, max_tokens=a.max_turn_tokens, stop=STOP_STRINGS,
-                        include_stop_str_in_output=True)
+    def sampling(stop):
+        return SamplingParams(temperature=0.0, max_tokens=a.max_turn_tokens, stop=stop, include_stop_str_in_output=True)
 
-    rows = load_questions(a.gold_dir, a.split, a.datasets, a.limit)
+    sp = sampling(STOP_STRINGS)
+
+    if a.questions_parquet:
+        rows = load_parquet_questions(a.questions_parquet, a.limit)
+        a.datasets, a.split = ["parquet"], os.path.basename(a.questions_parquet)
+    else:
+        rows = load_questions(a.gold_dir, a.split, a.datasets, a.limit)
     for r in rows:
-        r.update(prompt=make_prompt(tok, r["question"]), output="", n_turns=0, n_search=0, finish=None)
+        r.update(prompt=make_prompt(tok, r["question"]), output="", n_turns=0, n_search=0, n_forced=0, n_overridden=0,
+                 n_close_appended=0, finish=None)
     print(f"{len(rows)} questions from {a.datasets} ({a.split})", flush=True)
 
     t0 = time.time()
@@ -109,10 +176,13 @@ def main():
         for i in too_long:
             rows[i]["finish"] = "context_full"
         active = [i for i in active if i not in set(too_long)]
-        outs = llm.generate([rows[i]["prompt"] + rows[i]["output"] for i in active], sp, use_tqdm=False)
+        forced = {i: forced_action(a.depth_policy, rows[i]["n_search"]) for i in active}
+        free = [i for i in active if forced[i] is None]
+        outs = llm.generate([rows[i]["prompt"] + rows[i]["output"] for i in free], sp, use_tqdm=False) if free else []
 
         searches, still = [], []
-        for i, o in zip(active, outs):
+        forced_turns(llm, rows, [i for i in active if forced[i]], forced, sampling, searches)
+        for i, o in zip(free, outs):
             text = o.outputs[0].text
             r = rows[i]
             r["n_turns"] += 1
@@ -144,12 +214,18 @@ def main():
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     with open(a.out, "w") as f:
         for r in rows:
-            f.write(json.dumps({"dataset": r["dataset"], "id": r["id"], "output": r["output"],
-                                "n_turns": r["n_turns"], "finish": r["finish"]}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({"dataset": r["dataset"], "id": r["id"], "output": r["output"], "n_turns": r["n_turns"],
+                                "n_search": r["n_search"], "n_forced": r["n_forced"], "n_overridden": r["n_overridden"],
+                                "n_close_appended": r["n_close_appended"], "finish": r["finish"],
+                                "depth_policy": a.depth_policy}, ensure_ascii=False) + "\n")
     finish = {}
     for r in rows:
         finish[r["finish"]] = finish.get(r["finish"], 0) + 1
     print(f"wrote {a.out} in {time.time() - t0:.0f}s; finish reasons: {finish}", flush=True)
+    n = len(rows) or 1
+    print(f"depth_policy {a.depth_policy}: searches/q {sum(r['n_search'] for r in rows) / n:.3f}, "
+          f"forced turns overridden {sum(r['n_overridden'] for r in rows)}/{sum(r['n_forced'] for r in rows)}, "
+          f"closing tags appended {sum(r['n_close_appended'] for r in rows)}", flush=True)
 
 
 if __name__ == "__main__":

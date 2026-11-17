@@ -14,6 +14,7 @@ source "$ROOT/configs/gpus.env"
 # shellcheck source=paths.sh
 source "$ROOT/scripts/paths.sh"   # DATA and hf_snapshot
 
+[[ -n ${GQ_GPUS:-} ]] && GPUS=$GQ_GPUS   # under gq (~/tools/gq): the GPUs the scheduler gave this job
 if [[ ! $GPUS =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     echo "configs/gpus.env: GPUS='$GPUS' must look like 0,1,2,3" >&2
     exit 1
@@ -50,6 +51,9 @@ server_running() {
     pgrep -f "python[^ ]* [^ ]*retrieval_server.py" >/dev/null
 }
 
+wandb_ready() {   # logged in to W&B (wandb login writes ~/.netrc) or WANDB_API_KEY set
+    [[ -n ${WANDB_API_KEY:-} ]] || grep -qs "api.wandb.ai" ~/.netrc
+}
 require_retrieval_server() {
     curl -sf localhost:8000/health >/dev/null || { echo "retrieval server not up: bash scripts/serve_retrieval.sh" >&2; exit 1; }
 }

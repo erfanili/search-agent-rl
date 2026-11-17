@@ -85,3 +85,41 @@ def test_logged_keys():
     out = compute_score("hotpotqa", TWO_SEARCH_RIGHT, GOLD)
     assert out["n_search"] == 2 and out["n_distinct_search"] == 2
     assert out["evidence_hit"] == 1.0 and out["correct_multi"] == 1.0
+
+
+# ---- batch entry point and per-step depth statistics (agent/step_stats.py) ------------------
+
+def test_batch_scores_equal_row_scores_and_log_one_line_per_step(tmp_path):
+    import json
+
+    from agent import step_stats
+    from agent.reward import compute_score_batch
+
+    step_stats.STATE["train_calls"] = 0
+    # two groups of 3: group 0 mixes depth and score, group 1 is all-correct at one search (zero variance)
+    sols = [ONE_SEARCH_RIGHT, TWO_SEARCH_RIGHT, EVIDENCE_WRONG_ANSWER] + [ONE_SEARCH_RIGHT] * 3
+    extras = [{"index": 0, "d1_hit": 1}] * 3 + [{"index": 1, "d1_hit": 0}] * 3
+    log = tmp_path / "reward_steps.jsonl"
+    kw = dict(metric="em", log_path=str(log), step_offset=40)
+    out = compute_score_batch(["nq"] * 6, sols, [GOLD] * 6, extras, **kw)
+    assert out == [compute_score("nq", s, GOLD, e, metric="em") for s, e in zip(sols, extras)]
+    compute_score_batch(["hotpotqa"] * 2, sols[:2], [GOLD] * 2, [{"index": 7}, {"index": 8}], **kw)  # n=1: val
+
+    train, val = [json.loads(line) for line in open(log)]
+    assert (train["split"], train["step"], val["split"], val["step"]) == ("train", 41, "val", 41)
+    assert train["n"] == 6 and train["n_groups"] == 2 and train["group_size"] == 3
+    assert train["mean_search"] == pytest.approx(7 / 6)
+    assert train["share_gt"]["0"] == 1 and train["share_gt"]["1"] == pytest.approx(1 / 6)
+    assert train["score_by_depth"] == {"1": pytest.approx(4 / 5), "2": 1.0}
+    assert train["zero_var_groups"] == 0.5 and train["all_one_groups"] == 0.5 and train["all_zero_groups"] == 0
+    assert train["mixed_depth_groups"] == 0.5 and train["depth_contrast_groups"] == 0.5
+    assert train["by_label"]["d1_hit"]["0"]["mean_score"] == 1.0
+    assert train["by_label"]["d1_hit"]["1"]["share_gt1"] == pytest.approx(1 / 3)
+
+
+def test_batch_stats_failure_never_breaks_rewards():
+    from agent.reward import compute_score_batch
+
+    out = compute_score_batch(["nq"], [ONE_SEARCH_RIGHT], [GOLD], [{"index": 0}], metric="em",
+                              log_path="/proc/forbidden/x.jsonl")
+    assert out[0]["score"] == 1.0

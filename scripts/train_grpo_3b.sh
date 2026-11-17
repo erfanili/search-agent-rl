@@ -6,6 +6,13 @@
 #   TOTAL_STEPS=3 bash scripts/train_grpo_3b.sh full     # pilot: step time and memory before a long run
 #   DRY_RUN=1 bash scripts/train_grpo_3b.sh full         # print the resolved verl config, start nothing
 #   REWARD=em_hit bash scripts/train_grpo_3b.sh full     # reward arm: em (default), f1, em_hit, em_multi (agent/reward.py)
+#   DEPTH_POLICY=exact:2 bash scripts/train_grpo_3b.sh full   # env writes the action tags: free (default), exact:k, min:k
+#   SEED=2 bash scripts/train_grpo_3b.sh full            # data order + vLLM sampling seed (unset = earlier runs)
+#   MODEL=Qwen/Qwen2.5-1.5B bash scripts/train_grpo_3b.sh full   # other model; its name goes in the run name
+#   DEPTH_POLICY=free RESUME_FROM=<run>/ckpt/global_step_40 TOTAL_STEPS=60 bash scripts/train_grpo_3b.sh full
+#                                                        # release: continue a forced run from step 40 in a new run dir
+# Per-step depth statistics (searches, zero-variance groups, reward by depth): <run>/reward_steps.jsonl,
+#   printed by .venv/bin/python scripts/depth_dynamics.py <run>
 #
 # Hyperparameters follow Search-R1's train_grpo.sh (Qwen2.5-3B, GRPO, EM reward) unless noted:
 #   5 samples per prompt, lr 1e-6 with 28.5% warmup, KL loss 0.001 low_var_kl, temperature 1,
@@ -27,7 +34,9 @@ METHOD=${1:-}
 [[ $METHOD == full ]] || { echo "usage: bash scripts/train_grpo_3b.sh full" >&2; exit 1; }
 
 PY=$PWD/.venv-verl/bin/python
-MODEL_PATH=${MODEL_PATH:-$(hf_snapshot models Qwen/Qwen2.5-3B)}
+MODEL=${MODEL:-Qwen/Qwen2.5-3B}
+MODEL_PATH=${MODEL_PATH:-$(hf_snapshot models "$MODEL")}
+MODEL_NAME=${MODEL_NAME:-$(basename "$MODEL" | tr '[:upper:]' '[:lower:]')}   # qwen2.5-3b
 MODEL_PATH=${MODEL_PATH%/}   # verl's copy_to_local rejects a trailing slash
 DATA_DIR=${DATA_DIR:-$DATA/verl_data/nq_hotpotqa}
 verl_env
@@ -52,7 +61,13 @@ CKPT_KEEP=${CKPT_KEEP:-3}              # a full fine-tuning checkpoint with opti
 REWARD=${REWARD:-em}                   # agent/reward.py REWARDS; everything else is held fixed across arms
 HIT_BONUS=${HIT_BONUS:-0.2}            # em_hit: reward for gold answer appearing in retrieved passages
 MULTI_BONUS=${MULTI_BONUS:-0.2}        # em_multi: reward for a correct answer reached with >= 2 distinct queries
-LOGGER=${LOGGER:-'["console"]'}        # '["console","wandb"]' once wandb is logged in
+DEPTH_POLICY=${DEPTH_POLICY:-free}     # agent/search_r1_rollout.py; validation runs at this depth too (eval_checkpoint.sh for free depth)
+SEED=${SEED:-}                          # unset: verl defaults (data order seed 1, vLLM seed 0), as in the earlier runs;
+                                       # set: data.seed and rollout.seed both = SEED
+RESUME_FROM=${RESUME_FROM:-}           # a ckpt/global_step_N dir: load weights, optimizer, data order and step from it
+LOGGER=${LOGGER:-}                     # default: console + wandb when logged in (`.venv-verl/bin/wandb login`), else console
+GROUP=${GROUP:-}                       # W&B group: the question/experiment this run serves, e.g. E1
+NOTES=${NOTES:-}                       # W&B notes: why this run (question, prediction, what each outcome decides)
 
 LR=${LR:-1e-6}
 METHOD_ARGS=(
@@ -62,7 +77,21 @@ METHOD_ARGS=(
 )
 # -------------------------------------------------------------------------------
 
-[[ -n $MODEL_PATH && -f $MODEL_PATH/config.json ]] || { echo "Qwen2.5-3B not in $HF_HOME: hf download Qwen/Qwen2.5-3B" >&2; exit 1; }
+[[ -n $MODEL_PATH && -f $MODEL_PATH/config.json ]] || { echo "$MODEL not in $HF_HOME: hf download $MODEL" >&2; exit 1; }
+[[ $DEPTH_POLICY =~ ^(free|exact:[0-9]+|min:[0-9]+)$ ]] || { echo "DEPTH_POLICY=$DEPTH_POLICY: expected free, exact:k or min:k" >&2; exit 1; }
+STEP_OFFSET=0   # reward_steps.jsonl step numbers continue from a resumed checkpoint
+SEED_ARGS=()
+if [[ -n $SEED ]]; then
+    [[ $SEED =~ ^[0-9]+$ ]] || { echo "SEED=$SEED: expected an integer" >&2; exit 1; }
+    SEED_ARGS=(+data.seed=$SEED +actor_rollout_ref.rollout.seed=$SEED)
+fi
+RESUME_ARGS=(trainer.resume_mode=disable)
+if [[ -n $RESUME_FROM ]]; then
+    RESUME_FROM=$(realpath "$RESUME_FROM")
+    [[ $RESUME_FROM == */global_step_* && -d $RESUME_FROM/actor ]] || { echo "RESUME_FROM=$RESUME_FROM is not a ckpt/global_step_N dir" >&2; exit 1; }
+    RESUME_ARGS=(trainer.resume_mode=resume_path trainer.resume_from_path="$RESUME_FROM")
+    STEP_OFFSET=${RESUME_FROM##*global_step_}
+fi
 [[ -f $DATA_DIR/train.parquet ]] || { echo "no training data: $PY agent/make_train_data.py --out $DATA_DIR" >&2; exit 1; }
 DRY_RUN=${DRY_RUN:-0}
 (( DRY_RUN )) || require_retrieval_server
@@ -79,16 +108,29 @@ N_TRAIN=${#WORK_GPUS[@]}
 GPUS=$(IFS=,; echo "${WORK_GPUS[*]}")
 
 STAMP=$(date +%Y%m%d_%H%M%S)
-NAME=grpo_qwen2.5-3b_${METHOD}_${REWARD}_${STAMP}
+TAGS=$REWARD
+[[ $DEPTH_POLICY == free ]] || TAGS+=_${DEPTH_POLICY/:/}       # exact:2 -> exact2
+[[ -n $RESUME_FROM ]] && TAGS+=_resume$(basename "$RESUME_FROM" | tr -dc 0-9)   # source run: config.txt
+[[ -z $SEED ]] || TAGS+=_seed$SEED
+NAME=grpo_${MODEL_NAME}_${METHOD}_${TAGS}_${STAMP}
 OUT=$DATA/logs/$NAME
 HYDRA_EXTRA=()
 if (( DRY_RUN )); then OUT=$(mktemp -d "$DATA/rt/dry_XXXX"); HYDRA_EXTRA=(--cfg job); fi
 mkdir -p "$OUT/rollouts"
-sed "s#^\(  dump_dir:\).*#\1 $OUT/rollouts#" configs/agent_loop.yaml > "$OUT/agent_loop.yaml"
+sed -e "s#^\(  dump_dir:\).*#\1 $OUT/rollouts#" -e "s#^\(  depth_policy:\) *[^ ]*#\1 $DEPTH_POLICY#" \
+    configs/agent_loop.yaml > "$OUT/agent_loop.yaml"
+grep -q "^  depth_policy: $DEPTH_POLICY " "$OUT/agent_loop.yaml" || { echo "depth_policy not set in $OUT/agent_loop.yaml" >&2; exit 1; }
 if "$PY" -c "import flash_attn" 2>/dev/null; then REMOVE_PAD=True; else REMOVE_PAD=False; fi
+git diff HEAD > "$OUT/git.diff" 2>/dev/null || true   # uncommitted code this run used (with config.txt's commit)
+git ls-files --others --exclude-standard -z | xargs -0 -r tar czf "$OUT/git_untracked.tgz" 2>/dev/null || true
+if [[ -z $LOGGER ]]; then
+    if wandb_ready; then LOGGER='["console","wandb"]'; else LOGGER='["console"]'; echo "wandb not logged in: console logging only" >&2; fi
+fi
+export WANDB_DIR=$OUT WANDB_JOB_TYPE=train WANDB_RUN_GROUP=${GROUP:-$METHOD} WANDB_NOTES=$NOTES
+export WANDB_TAGS="reward:$REWARD,depth:${DEPTH_POLICY},seed:${SEED:-default},model:$MODEL_NAME${RESUME_FROM:+,resumed},git:$(git rev-parse --short HEAD 2>/dev/null || echo none)$(git diff --quiet HEAD 2>/dev/null || echo -dirty)"
 {
     echo "date: $(date -Is)"; echo "git: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD hit_bonus=$HIT_BONUS multi_bonus=$MULTI_BONUS"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"
+    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD hit_bonus=$HIT_BONUS multi_bonus=$MULTI_BONUS"; echo "depth_policy: $DEPTH_POLICY  seed: ${SEED:-default}  resume_from: ${RESUME_FROM:-none}"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"
     echo "batch=$TRAIN_BATCH n=$ROLLOUT_N mini=$MINI_BATCH max_response=$MAX_RESPONSE steps=$TOTAL_STEPS"
     echo "--- agent_loop.yaml"; cat "$OUT/agent_loop.yaml"
 } > "$OUT/config.txt"
@@ -120,6 +162,7 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.mode=async \
     actor_rollout_ref.rollout.n=$ROLLOUT_N \
+    "${SEED_ARGS[@]}" \
     actor_rollout_ref.rollout.temperature=1.0 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=$VLLM_MEM \
@@ -130,7 +173,10 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 4)) \
     "${METHOD_ARGS[@]}" \
     custom_reward_function.path="$PWD/agent/reward.py" \
-    custom_reward_function.name=compute_score \
+    reward_model.reward_manager=batch \
+    custom_reward_function.name=compute_score_batch \
+    +custom_reward_function.reward_kwargs.log_path="$OUT/reward_steps.jsonl" \
+    +custom_reward_function.reward_kwargs.step_offset=$STEP_OFFSET \
     +custom_reward_function.reward_kwargs.metric=$REWARD \
     +custom_reward_function.reward_kwargs.hit_bonus=$HIT_BONUS \
     +custom_reward_function.reward_kwargs.multi_bonus=$MULTI_BONUS \
@@ -147,6 +193,7 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     trainer.total_epochs=15 \
     trainer.total_training_steps=$TOTAL_STEPS \
     trainer.default_local_dir="$OUT/ckpt" \
+    "${RESUME_ARGS[@]}" \
     hydra.run.dir="$OUT/hydra" \
     "${HYDRA_EXTRA[@]}" \
     2>&1 | tee "$OUT/train.log"

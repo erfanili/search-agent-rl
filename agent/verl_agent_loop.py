@@ -47,6 +47,7 @@ class SearchR1AgentLoop(AgentLoopBase):
         topk=3,
         max_obs_tokens=500,
         invalid_action="retry",
+        depth_policy="free",
         chat_template=True,
         retrieval_timeout=60,
         retrieval_retries=3,
@@ -64,6 +65,7 @@ class SearchR1AgentLoop(AgentLoopBase):
             max_obs_tokens=max_obs_tokens,
             response_length=config.actor_rollout_ref.rollout.response_length,
             invalid_action=invalid_action,
+            depth_policy=depth_policy,
         )
         cls.chat_template = chat_template
         cls.retrieval_url = retrieval_url.rstrip("/")
@@ -100,16 +102,17 @@ class SearchR1AgentLoop(AgentLoopBase):
         episode_id = uuid4().hex
         n_calls = 0
         prompt_ids = await self.loop.run_in_executor(None, self._prompt_ids, messages)
-        # stop at the end of an action; max_tokens is set by verl's server (max_model_len - context)
-        sp = dict(sampling_params, stop=STOP_STRINGS, include_stop_str_in_output=True)
+        # stop strings come from the rollout: the end of an action (free turns), or the opening tag /
+        # forced closing tag (depth_policy). max_tokens is set by verl's server (max_model_len - context)
 
-        async def generate(context_ids):
+        async def generate(context_ids, stop=STOP_STRINGS):
             # Same server for every turn of an episode (prefix cache), but a fresh vLLM request id per
             # turn: vLLM 0.8.5 V1 frees a stop-string request with a late abort, and a reused id can
             # race it and corrupt the KV cache (notes/p1.3_rollout_contract.md).
             nonlocal n_calls
             n_calls += 1
             t = time.time()
+            sp = dict(sampling_params, stop=list(stop), include_stop_str_in_output=True)
             server = self.server_manager._choose_server(episode_id)
             out = await server.generate.remote(
                 request_id=f"{episode_id}-{n_calls}", prompt_ids=list(context_ids), sampling_params=sp
@@ -147,6 +150,9 @@ class SearchR1AgentLoop(AgentLoopBase):
             "n_search": ep.n_search,
             "n_invalid": ep.n_invalid,
             "n_close_tag_appended": ep.n_close_tag_appended,
+            "depth_policy": self.cfg.depth_policy,
+            "n_forced": ep.n_forced,
+            "n_overridden": ep.n_overridden,
             "queries": ep.queries,
             "prompt_ids": ep.prompt_ids,
             "prompt_text": self.tokenizer.decode(ep.prompt_ids, skip_special_tokens=False),

@@ -12,6 +12,7 @@
   topk: 3                 # passages per search (Search-R1: 3)
   max_obs_tokens: 500     # passage text cut to this many tokens (Search-R1 max_obs_length)
   invalid_action: retry   # retry: Search-R1's invalid-action message and another turn; stop: end episode
+  depth_policy: free      # free | exact:k | min:k: the env writes the action tags (agent/search_r1_rollout.py)
   chat_template: true     # false for base models prompted without chat markup (check with P1.2)
   dump_dir: null          # set to a directory to write episodes for scripts/view_rollouts.py
   dump_max: 200           # episodes written per worker process
