@@ -1,27 +1,17 @@
 # search-agent-rl
 
-Training LLM search agents with reinforcement learning. A Qwen2.5 model learns to write `<search>` queries against a 21M-passage Wikipedia index and answer multi-hop questions, using GRPO with an exact-match reward, in the style of [Search-R1](https://arxiv.org/abs/2503.09516).
+Infrastructure for studying **tool-use collapse** in RL-trained LLM agents: under outcome-reward RL, a search agent settles into a fixed, shallow pattern of tool calls (here, one search per question, even on 4-hop questions). A Qwen2.5 model writes `<search>` queries against a 21M-passage Wikipedia index and answers multi-hop questions, trained with GRPO in the style of [Search-R1](https://arxiv.org/abs/2503.09516).
 
-The pipeline runs on modest hardware (5 × 24 GB GPUs for training, one more for retrieval):
+The pipeline runs on modest hardware (4–5 × 24 GB GPUs for training; retrieval on CPU or one more GPU):
 - a dense retrieval service (e5-base-v2, FAISS IVF-SQ8);
 - multi-turn rollouts on vLLM through verl's async agent loop, with the loss mask built on token ids;
+- an environment-side depth policy (`free`, `exact:k`, `min:k`) that can force the number of searches;
+- per-step depth statistics (searches per rollout, zero-variance groups, reward by depth);
 - one scorer shared by the training reward and evaluation.
 
-## Results
+## Baseline
 
-Qwen2.5-3B (base), GRPO for 60 steps: 64 questions × 5 samples per step, 8.8 h on 5 × RTX A5000. That is 3,840 training questions, 0.75% of Search-R1's 514,560. Every row below is evaluated with the same harness: same prompt, retriever, turn limits, greedy decoding and scorer. EM is in %, on fixed 300-question dev subsets (Bamboogle: all 125 questions).
-
-| model | HotpotQA | 2Wiki | MuSiQue | Bamboogle | avg, 3 multi-hop | searches / q |
-|---|---|---|---|---|---|---|
-| Qwen2.5-3B base, prompted | 8.7 | 7.7 | 2.3 | 7.2 | 6.2 | 0.8–1.1 |
-| **+ GRPO, 60 steps (this repo)** | 23.7 | 28.7 | 7.7 | 4.8 | **20.0** | 1.0 |
-| Search-R1-3B, released checkpoint | 27.3 | 26.0 | 6.3 | — | 19.9 | 1.0 |
-
-- **Ties the released Search-R1-3B with 0.75% of its training data.** A paired sign test on identical questions finds no significant difference on any set (p = 0.14–0.48). Search-R1's own reported numbers for this checkpoint are 29.7, 27.4 and 6.6 ([2503.09516](https://arxiv.org/abs/2503.09516) v5, Table 3); our harness lands within 0.3–2.4 EM of them.
-- **Format is learned in about 20 steps.** By step 20, 97–100% of episodes end with an answer, up from 53–68%. Accuracy among answered episodes keeps rising after that on 2Wiki and MuSiQue.
-- **Neither agent learns multi-hop search.** Both make one search per question, even on 4-hop MuSiQue. Our agent often uses the question itself as the query: verbatim in 29–59% of episodes. Bamboogle, whose questions need a second, dependent search, drops below the base model.
-
-Full per-step results, training dynamics and the error analysis: [`notes/results_grpo_3b_60step.md`](notes/results_grpo_3b_60step.md). Evaluating the released Search-R1 checkpoint: [`notes/baseline_searchr1.md`](notes/baseline_searchr1.md).
+Qwen2.5-3B, EM GRPO, 60 steps: 20.0 multi-hop EM, freezes at 1.0 search/q (see tag [`v0-grpo-3b-60step`](../../tree/v0-grpo-3b-60step)). The released Search-R1-3B scores 19.9 through the same harness, also at 1.0 search/q ([`notes/baseline_searchr1.md`](notes/baseline_searchr1.md)). Earlier experiments on this plateau (reward arms, forced-depth curves) are on the `archive/depth-study` branch.
 
 ## How it works
 
@@ -84,7 +74,7 @@ bash scripts/eval_checkpoint.sh $DATA_ROOT/logs/<run>/ckpt/global_step_60   # me
 | path | contents |
 |---|---|
 | `retrieval/` | corpus encoding, index build, retrieval server, benchmark |
-| `agent/` | rollout protocol (`search_r1_rollout.py`), verl agent loop, reward, QA metrics, training data |
+| `agent/` | rollout protocol and depth policy (`search_r1_rollout.py`), verl agent loop, reward, QA metrics, per-step depth stats, training data and labels |
 | `baselines/` | Search-R1-style inference for evaluating any checkpoint |
 | `tests/` | eval-set builder, scorer, unit tests for the metrics and the rollout contract (loss mask, tags, reward) |
 | `scripts/` | launch scripts for every stage |
