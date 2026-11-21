@@ -14,7 +14,7 @@ Contract checked:
   4. budget  turn limit, per-search passage cap, total response length; never ends on env tokens
   5. reward  the training reward (agent/reward.py) equals the eval scorer (agent/qa_metrics.py)
              on the same trajectory, and env text can never be read as the model's answer
-  6. depth   depth_policy exact:k / min:k: the forced opening tags are env tokens (mask 0), the
+  6. depth   depth_policy exact:k / min:k / max:k: the forced opening tags are env tokens (mask 0), the
              search count is exactly k (at least k), the policy's own tag is discarded, and the
              reward still sits on a model token
 
@@ -234,7 +234,8 @@ def test_free_turns_stop_at_the_end_of_an_action(tok):
 def test_parse_depth_policy():
     assert parse_depth_policy("free") == ("free", 0)
     assert parse_depth_policy("exact:2") == ("exact", 2) and parse_depth_policy("min:1") == ("min", 1)
-    for bad in ("exact", "exact:-1", "max:2", "2"):
+    assert parse_depth_policy("max:3") == ("max", 3)
+    for bad in ("exact", "exact:-1", "max", "max:-1", "upto:2", "2"):
         with pytest.raises(ValueError):
             parse_depth_policy(bad)
     with pytest.raises(ValueError):
@@ -242,6 +243,9 @@ def test_parse_depth_policy():
     assert [forced_action("exact:2", n) for n in range(3)] == ["search", "search", "answer"]
     assert [forced_action("min:1", n) for n in range(2)] == ["search", None]
     assert forced_action("free", 0) is None
+    assert [forced_action("max:2", n) for n in range(4)] == [None, None, "answer", "answer"]
+    with pytest.raises(ValueError):
+        RolloutConfig(max_turns=2, depth_policy="max:3")
 
 
 # The policy wants to answer at once; exact:2 makes it search twice.
@@ -290,6 +294,26 @@ def test_exact_0_answers_without_searching(tok):
     assert ep.finish == "answer" and ep.n_search == 0 and retriever.queries == [] and ep.n_overridden == 1
     assert compute_score("hotpotqa", tok.decode(ep.response_ids, skip_special_tokens=True),
                          {"target": ["Charles Babbage"]})["score"] == 1.0
+
+
+def test_max_k_forces_the_answer_after_k_searches(tok):
+    # the policy searches twice on its own; at max:2 the third turn gets a forced <answer>, its own <search> is overridden
+    turns = [T_SEARCH, "<think>more</think>\n<search> Babbage engine </search>",
+             "<think>and again</think>\n<search> third query </search>", " Charles Babbage </answer>"]
+    ep, model, retriever, _ = run(tok, turns, cfg=RolloutConfig(max_turns=2, depth_policy="max:2"))
+    assert ep.finish == "answer" and ep.n_search == 2 and ep.n_forced == 1 and ep.n_overridden == 1
+    assert len(retriever.queries) == 2 and "third query" not in retriever.queries
+    assert model.stops == [STOP_STRINGS, STOP_STRINGS, OPEN_STOP_STRINGS, ["</answer>"]]
+    assert [(s.role, s.kind) for s in ep.segments][-3:] == [("model", "think"), ("env", "forced_answer"), ("model", "answer")]
+    assert ep.response_mask[-1] == 1
+    r = compute_score("hotpotqa", tok.decode(ep.response_ids, skip_special_tokens=True), {"target": ["Charles Babbage"]})
+    assert r["score"] == 1.0 and r["n_search"] == 2.0
+
+
+def test_max_k_leaves_an_early_answer_alone(tok):
+    ep, model, retriever, _ = run(tok, [T_SEARCH, T_ANSWER], cfg=RolloutConfig(max_turns=3, depth_policy="max:3"))
+    assert ep.finish == "answer" and ep.n_search == 1 and ep.n_forced == 0
+    assert model.stops == [STOP_STRINGS, STOP_STRINGS]
 
 
 def test_min_k_forces_k_searches_then_frees_the_policy(tok):

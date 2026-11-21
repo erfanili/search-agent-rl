@@ -29,6 +29,9 @@ intervention on the stop-or-continue decision:
   exact:k  the environment writes every opening action tag: <search> while fewer than k searches are
            done, then <answer>. The policy writes its reasoning, the query and the answer.
   min:k    <search> is forced for the first k searches; after that the policy chooses freely.
+  max:k    the policy chooses freely until it has made k searches; then the environment writes <answer>.
+           At most k searches, and an episode that reaches k always ends with an answer (needs
+           max_turns >= k so the forced turn exists).
 A forced turn is generated in two parts. Part 1 stops at the first opening tag the policy writes
 (or ends without one); that tag is discarded and the forced tag is appended as ENV tokens (mask 0),
 so the policy is never trained on a decision it did not make. Part 2 continues from the forced tag
@@ -107,13 +110,13 @@ class RolloutConfig:
 
 
 def parse_depth_policy(policy):
-    """'free' -> ('free', 0); 'exact:2' -> ('exact', 2); 'min:1' -> ('min', 1)."""
+    """'free' -> ('free', 0); 'exact:2' -> ('exact', 2); 'min:1' -> ('min', 1); 'max:3' -> ('max', 3)."""
     policy = str(policy).strip()
     if policy == "free":
         return "free", 0
     mode, _, k = policy.partition(":")
-    if mode not in ("exact", "min") or not k.isdigit():
-        raise ValueError(f"depth_policy={policy!r}; expected free, exact:k or min:k")
+    if mode not in ("exact", "min", "max") or not k.isdigit():
+        raise ValueError(f"depth_policy={policy!r}; expected free, exact:k, min:k or max:k")
     return mode, int(k)
 
 
@@ -122,6 +125,8 @@ def forced_action(policy, n_search):
     mode, k = parse_depth_policy(policy)
     if mode == "free":
         return None
+    if mode == "max":
+        return "answer" if n_search >= k else None
     if n_search < k:
         return "search"
     return "answer" if mode == "exact" else None

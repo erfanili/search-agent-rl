@@ -16,6 +16,7 @@ so the numbers are comparable with Search-R1 and with our trained agents. Search
               training: a forced turn generates until the policy opens a tag (or --max-turn-tokens), the
               script writes <search> while fewer than k searches are done (exact:k: <answer> after), and
               the policy writes the query or answer up to its closing tag. exact:k = exactly k searches.
+              max:k: free until k searches are done, then the script writes <answer>.
 
 Output (one line per question): {"dataset", "id", "output", "n_turns", "n_search", "n_forced", "n_overridden",
 "n_close_appended", "finish", "depth_policy"} where n_overridden counts forced turns in which the policy had
@@ -132,7 +133,7 @@ def main():
     p.add_argument("--url", default="http://127.0.0.1:8000")
     p.add_argument("--topk", type=int, default=3)
     p.add_argument("--max-turns", type=int, default=4)
-    p.add_argument("--depth-policy", default="free", help="free | exact:k | min:k (k <= --max-turns)")
+    p.add_argument("--depth-policy", default="free", help="free | exact:k | min:k | max:k (k <= --max-turns)")
     p.add_argument("--max-turn-tokens", type=int, default=500, help="Search-R1 max_response_length")
     p.add_argument("--max-obs-tokens", type=int, default=500, help="Search-R1 max_obs_length")
     p.add_argument("--max-model-len", type=int, default=8192)
