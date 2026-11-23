@@ -29,6 +29,7 @@ from uuid import uuid4
 
 import requests
 
+from agent.garble import is_garbled, write_event  # noqa: E402
 from agent.search_r1_rollout import STOP_STRINGS, RolloutConfig, prompt_ids_for, run_episode
 from verl.experimental.agent_loop.agent_loop import AgentLoopBase, AgentLoopOutput
 
@@ -53,6 +54,7 @@ class SearchR1AgentLoop(AgentLoopBase):
         retrieval_retries=3,
         dump_dir=None,
         dump_max=200,
+        garble_dir=None,
         **kwargs,
     ):
         if cls._class_initialized:
@@ -74,6 +76,7 @@ class SearchR1AgentLoop(AgentLoopBase):
         cls.dump_dir = dump_dir
         cls.dump_max = dump_max
         cls.n_dumped = 0
+        cls.garble_dir = garble_dir  # per-episode garble events per vLLM server (agent/garble.py)
         if dump_dir:
             os.makedirs(dump_dir, exist_ok=True)
         print(f"SearchR1AgentLoop: {cls.cfg}, chat_template={chat_template}, retrieval={cls.retrieval_url}, dump_dir={dump_dir}")
@@ -101,6 +104,7 @@ class SearchR1AgentLoop(AgentLoopBase):
         times = {"generate_sequences": 0.0, "tool_calls": 0.0}  # summed over the episode's turns
         episode_id = uuid4().hex
         n_calls = 0
+        servers_used = []
         prompt_ids = await self.loop.run_in_executor(None, self._prompt_ids, messages)
         # stop strings come from the rollout: the end of an action (free turns), or the opening tag /
         # forced closing tag (depth_policy). max_tokens is set by verl's server (max_model_len - context)
@@ -114,6 +118,7 @@ class SearchR1AgentLoop(AgentLoopBase):
             t = time.time()
             sp = dict(sampling_params, stop=list(stop), include_stop_str_in_output=True)
             server = self.server_manager._choose_server(episode_id)
+            servers_used.append(server)
             out = await server.generate.remote(
                 request_id=f"{episode_id}-{n_calls}", prompt_ids=list(context_ids), sampling_params=sp
             )
@@ -128,9 +133,18 @@ class SearchR1AgentLoop(AgentLoopBase):
 
         ep = await run_episode(prompt_ids, generate, retrieve, self.tokenizer, self.cfg)
 
+        if self.garble_dir:
+            try:
+                texts = [self.tokenizer.decode(s.ids, skip_special_tokens=False) for s in ep.segments if s.role == "model"]
+                ranks = self._server_ranks(servers_used)
+                write_event(self.garble_dir, ranks[0] if len(ranks) == 1 else -1, is_garbled(texts),
+                            bool(texts) and is_garbled(texts[:1]))
+            except Exception as exc:  # diagnostics must never stop training
+                print(f"SearchR1AgentLoop: garble event failed: {exc!r}")
+
         if self.dump_dir and SearchR1AgentLoop.n_dumped < self.dump_max:
             SearchR1AgentLoop.n_dumped += 1
-            self._dump(ep)
+            self._dump(ep, servers_used)
 
         n_model_turns = sum(s.role == "model" for s in ep.segments)
         n_env = sum(s.role == "env" for s in ep.segments)
@@ -142,10 +156,30 @@ class SearchR1AgentLoop(AgentLoopBase):
             metrics=times,
         )
 
-    def _dump(self, ep):
-        """One JSON line per episode, ids and text per segment, for scripts/view_rollouts.py."""
+    _server_rank = None  # actor id hex -> vLLM server dp rank (verl names them async_llm_server_<rank>)
+
+    def _server_ranks(self, servers):
+        if SearchR1AgentLoop._server_rank is None:
+            import ray
+            m = {}
+            for r in range(len(self.server_manager.server_handles)):
+                try:
+                    m[ray.get_actor(f"async_llm_server_{r}")._actor_id.hex()] = r
+                except Exception:
+                    pass
+            SearchR1AgentLoop._server_rank = m
+        return sorted({SearchR1AgentLoop._server_rank.get(h._actor_id.hex(), -1) for h in servers})
+
+    def _dump(self, ep, servers_used=()):
+        """One JSON line per episode, ids and text per segment, for scripts/view_rollouts.py.
+        server_ranks: dp rank(s) of the vLLM server(s) that generated the episode (E005 diagnosis, 2026-11-22)."""
+        try:
+            ranks = self._server_ranks(servers_used)
+        except Exception:
+            ranks = []
         rec = {
             "pid": os.getpid(),
+            "server_ranks": ranks,
             "finish": ep.finish,
             "n_search": ep.n_search,
             "n_invalid": ep.n_invalid,

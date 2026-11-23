@@ -5,8 +5,11 @@
 #   bash scripts/train_grpo_3b.sh full                   # one-day run: 300 steps of 128 x 5
 #   TOTAL_STEPS=3 bash scripts/train_grpo_3b.sh full     # pilot: step time and memory before a long run
 #   DRY_RUN=1 bash scripts/train_grpo_3b.sh full         # print the resolved verl config, start nothing
-#   REWARD=em_hit bash scripts/train_grpo_3b.sh full     # reward arm: em (default), f1, em_hit, em_multi (agent/reward.py)
-#   DEPTH_POLICY=exact:2 bash scripts/train_grpo_3b.sh full   # env writes the action tags: free (default), exact:k, min:k
+#   REWARD=f1 bash scripts/train_grpo_3b.sh full         # reward: em (default) or f1 (agent/reward.py)
+#   DEPTH_POLICY=exact:2 bash scripts/train_grpo_3b.sh full   # env writes the action tags: free (default), exact:k, min:k, max:k
+#   MAX_TURNS=3 DEPTH_POLICY=max:3 ...                   # agent_loop.yaml max_turns override; max:k = forced answer after k searches
+#   RUN_DIR=$DATA_ROOT/logs/E004/E004-A-s0 ...           # output directory (default: $DATA_ROOT/logs/<generated name>)
+#   TEST_FREQ=-1 VAL_BEFORE_TRAIN=False ...              # no validation during training
 #   SEED=2 bash scripts/train_grpo_3b.sh full            # data order + vLLM sampling seed (unset = earlier runs)
 #   MODEL=Qwen/Qwen2.5-1.5B bash scripts/train_grpo_3b.sh full   # other model; its name goes in the run name
 #   DEPTH_POLICY=free RESUME_FROM=<run>/ckpt/global_step_40 TOTAL_STEPS=60 bash scripts/train_grpo_3b.sh full
@@ -52,15 +55,25 @@ MAX_RESPONSE=${MAX_RESPONSE:-2048}     # whole episode: model turns + retrieved 
 MAX_TOKENS_PER_GPU=${MAX_TOKENS_PER_GPU:-6144}
 VLLM_MEM=${VLLM_MEM:-0.7}              # vLLM has the GPU to itself during rollout (actor offloaded, KV freed after)
 ENFORCE_EAGER=${ENFORCE_EAGER:-False}  # False: CUDA graphs, much faster decoding for a 3B model (verl default: True)
+PREFIX_CACHING=${PREFIX_CACHING:-True}   # False: agent/vllm_server.py AsyncvLLMServerNoPrefixCache (verl hard-codes True)
+SERVER_ARGS=()
+if [[ $PREFIX_CACHING == False ]]; then
+  SERVER_ARGS=(actor_rollout_ref.rollout.agent.custom_async_server.path=pkg://agent.vllm_server
+               actor_rollout_ref.rollout.agent.custom_async_server.name=AsyncvLLMServerNoPrefixCache)
+fi
 AGENT_WORKERS=${AGENT_WORKERS:-8}
 TOTAL_STEPS=${TOTAL_STEPS:-300}
 WARMUP_RATIO=${WARMUP_RATIO:-0.285}
 TEST_FREQ=${TEST_FREQ:-50}
 SAVE_FREQ=${SAVE_FREQ:-100}
 CKPT_KEEP=${CKPT_KEEP:-3}              # a full fine-tuning checkpoint with optimizer state is ~40 GB
-REWARD=${REWARD:-em}                   # agent/reward.py REWARDS; everything else is held fixed across arms
-HIT_BONUS=${HIT_BONUS:-0.2}            # em_hit: reward for gold answer appearing in retrieved passages
-MULTI_BONUS=${MULTI_BONUS:-0.2}        # em_multi: reward for a correct answer reached with >= 2 distinct queries
+REWARD=${REWARD:-em}                   # agent/reward.py REWARDS
+REWARD_ARM=${REWARD_ARM:-none}         # E005 arm term added to the outcome reward: none, C (cost), S, O (agent/reward.py)
+ARM_LAM=${ARM_LAM:-0.3}                # decision-term weight (arms S, O)
+ARM_COST=${ARM_COST:-0.15}             # cost per executed search (arm C)
+MAX_TURNS=${MAX_TURNS:-}               # unset: configs/agent_loop.yaml (4)
+VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-True}
+RUN_DIR=${RUN_DIR:-}
 DEPTH_POLICY=${DEPTH_POLICY:-free}     # agent/search_r1_rollout.py; validation runs at this depth too (eval_checkpoint.sh for free depth)
 SEED=${SEED:-}                          # unset: verl defaults (data order seed 1, vLLM seed 0), as in the earlier runs;
                                        # set: data.seed and rollout.seed both = SEED
@@ -78,7 +91,8 @@ METHOD_ARGS=(
 # -------------------------------------------------------------------------------
 
 [[ -n $MODEL_PATH && -f $MODEL_PATH/config.json ]] || { echo "$MODEL not in $HF_HOME: hf download $MODEL" >&2; exit 1; }
-[[ $DEPTH_POLICY =~ ^(free|exact:[0-9]+|min:[0-9]+)$ ]] || { echo "DEPTH_POLICY=$DEPTH_POLICY: expected free, exact:k or min:k" >&2; exit 1; }
+[[ $DEPTH_POLICY =~ ^(free|exact:[0-9]+|min:[0-9]+|max:[0-9]+)$ ]] || { echo "DEPTH_POLICY=$DEPTH_POLICY: expected free, exact:k, min:k or max:k" >&2; exit 1; }
+[[ -z $MAX_TURNS || $MAX_TURNS =~ ^[0-9]+$ ]] || { echo "MAX_TURNS=$MAX_TURNS: expected an integer" >&2; exit 1; }
 STEP_OFFSET=0   # reward_steps.jsonl step numbers continue from a resumed checkpoint
 SEED_ARGS=()
 if [[ -n $SEED ]]; then
@@ -109,16 +123,21 @@ GPUS=$(IFS=,; echo "${WORK_GPUS[*]}")
 
 STAMP=$(date +%Y%m%d_%H%M%S)
 TAGS=$REWARD
+[[ $REWARD_ARM == none ]] || TAGS+=_arm$REWARD_ARM
 [[ $DEPTH_POLICY == free ]] || TAGS+=_${DEPTH_POLICY/:/}       # exact:2 -> exact2
 [[ -n $RESUME_FROM ]] && TAGS+=_resume$(basename "$RESUME_FROM" | tr -dc 0-9)   # source run: config.txt
 [[ -z $SEED ]] || TAGS+=_seed$SEED
 NAME=grpo_${MODEL_NAME}_${METHOD}_${TAGS}_${STAMP}
-OUT=$DATA/logs/$NAME
+OUT=${RUN_DIR:-$DATA/logs/$NAME}
 HYDRA_EXTRA=()
 if (( DRY_RUN )); then OUT=$(mktemp -d "$DATA/rt/dry_XXXX"); HYDRA_EXTRA=(--cfg job); fi
 mkdir -p "$OUT/rollouts"
-sed -e "s#^\(  dump_dir:\).*#\1 $OUT/rollouts#" -e "s#^\(  depth_policy:\) *[^ ]*#\1 $DEPTH_POLICY#" \
+sed -e "s#^\(  dump_dir:\).*#\1 $OUT/rollouts\n  garble_dir: $OUT/garble#" -e "s#^\(  depth_policy:\) *[^ ]*#\1 $DEPTH_POLICY#" \
     configs/agent_loop.yaml > "$OUT/agent_loop.yaml"
+if [[ -n $MAX_TURNS ]]; then
+    sed -i "s#^\(  max_turns:\) *[0-9]*#\1 $MAX_TURNS#" "$OUT/agent_loop.yaml"
+    grep -q "^  max_turns: $MAX_TURNS " "$OUT/agent_loop.yaml" || { echo "max_turns not set in $OUT/agent_loop.yaml" >&2; exit 1; }
+fi
 grep -q "^  depth_policy: $DEPTH_POLICY " "$OUT/agent_loop.yaml" || { echo "depth_policy not set in $OUT/agent_loop.yaml" >&2; exit 1; }
 if "$PY" -c "import flash_attn" 2>/dev/null; then REMOVE_PAD=True; else REMOVE_PAD=False; fi
 git diff HEAD > "$OUT/git.diff" 2>/dev/null || true   # uncommitted code this run used (with config.txt's commit)
@@ -130,7 +149,7 @@ export WANDB_DIR=$OUT WANDB_JOB_TYPE=train WANDB_RUN_GROUP=${GROUP:-$METHOD} WAN
 export WANDB_TAGS="reward:$REWARD,depth:${DEPTH_POLICY},seed:${SEED:-default},model:$MODEL_NAME${RESUME_FROM:+,resumed},git:$(git rev-parse --short HEAD 2>/dev/null || echo none)$(git diff --quiet HEAD 2>/dev/null || echo -dirty)"
 {
     echo "date: $(date -Is)"; echo "git: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD hit_bonus=$HIT_BONUS multi_bonus=$MULTI_BONUS"; echo "depth_policy: $DEPTH_POLICY  seed: ${SEED:-default}  resume_from: ${RESUME_FROM:-none}"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"
+    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD  arm: $REWARD_ARM  lam: $ARM_LAM  cost: $ARM_COST"; echo "depth_policy: $DEPTH_POLICY  seed: ${SEED:-default}  resume_from: ${RESUME_FROM:-none}"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"; echo "vllm: prefix_caching=$PREFIX_CACHING enforce_eager=$ENFORCE_EAGER"
     echo "batch=$TRAIN_BATCH n=$ROLLOUT_N mini=$MINI_BATCH max_response=$MAX_RESPONSE steps=$TOTAL_STEPS"
     echo "--- agent_loop.yaml"; cat "$OUT/agent_loop.yaml"
 } > "$OUT/config.txt"
@@ -167,6 +186,7 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.gpu_memory_utilization=$VLLM_MEM \
     actor_rollout_ref.rollout.enforce_eager=$ENFORCE_EAGER \
+    "${SERVER_ARGS[@]}" \
     actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=$((MAX_TOKENS_PER_GPU * 4)) \
     actor_rollout_ref.rollout.agent.num_workers=$AGENT_WORKERS \
     actor_rollout_ref.rollout.agent.agent_loop_config_path="$OUT/agent_loop.yaml" \
@@ -177,16 +197,21 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     custom_reward_function.name=compute_score_batch \
     +custom_reward_function.reward_kwargs.log_path="$OUT/reward_steps.jsonl" \
     +custom_reward_function.reward_kwargs.step_offset=$STEP_OFFSET \
+    +custom_reward_function.reward_kwargs.sample_path="$OUT/rollout_samples.jsonl" \
+    +custom_reward_function.reward_kwargs.sample_n=${SAMPLE_N:-50} \
+    +custom_reward_function.reward_kwargs.garble_dir="$OUT/garble" \
+    +custom_reward_function.reward_kwargs.garble_warn=${GARBLE_WARN:-0.10} \
     +custom_reward_function.reward_kwargs.metric=$REWARD \
-    +custom_reward_function.reward_kwargs.hit_bonus=$HIT_BONUS \
-    +custom_reward_function.reward_kwargs.multi_bonus=$MULTI_BONUS \
+    +custom_reward_function.reward_kwargs.arm=$REWARD_ARM \
+    +custom_reward_function.reward_kwargs.lam=$ARM_LAM \
+    +custom_reward_function.reward_kwargs.cost=$ARM_COST \
     trainer.critic_warmup=0 \
     trainer.logger="$LOGGER" \
     trainer.project_name=search-agent-rl \
     trainer.experiment_name=$NAME \
     trainer.n_gpus_per_node=$N_TRAIN \
     trainer.nnodes=1 \
-    trainer.val_before_train=True \
+    trainer.val_before_train=$VAL_BEFORE_TRAIN \
     trainer.test_freq=$TEST_FREQ \
     trainer.save_freq=$SAVE_FREQ \
     trainer.max_actor_ckpt_to_keep=$CKPT_KEEP \
