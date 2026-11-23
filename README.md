@@ -1,17 +1,13 @@
 # search-agent-rl
 
-Infrastructure for studying **tool-use collapse** in RL-trained LLM agents: under outcome-reward RL, a search agent settles into a fixed, shallow pattern of tool calls (here, one search per question, even on 4-hop questions). A Qwen2.5 model writes `<search>` queries against a 21M-passage Wikipedia index and answers multi-hop questions, trained with GRPO in the style of [Search-R1](https://arxiv.org/abs/2503.09516).
+Training LLM search agents with reinforcement learning. A Qwen2.5 model learns to write `<search>` queries against a 21M-passage Wikipedia index and answer multi-hop questions, using GRPO with an exact-match reward, in the style of [Search-R1](https://arxiv.org/abs/2503.09516).
 
-The pipeline runs on modest hardware (4–5 × 24 GB GPUs for training; retrieval on CPU or one more GPU):
+The pipeline runs on modest hardware (5 × 24 GB GPUs for training, one more for retrieval):
 - a dense retrieval service (e5-base-v2, FAISS IVF-SQ8);
 - multi-turn rollouts on vLLM through verl's async agent loop, with the loss mask built on token ids;
-- an environment-side depth policy (`free`, `exact:k`, `min:k`) that can force the number of searches;
-- per-step depth statistics (searches per rollout, zero-variance groups, reward by depth);
 - one scorer shared by the training reward and evaluation.
 
-## Baseline
-
-Qwen2.5-3B, EM GRPO, 60 steps: 20.0 multi-hop EM, freezes at 1.0 search/q (see tag [`v0-grpo-3b-60step`](../../tree/v0-grpo-3b-60step)). The released Search-R1-3B scores 19.9 through the same harness, also at 1.0 search/q ([`notes/baseline_searchr1.md`](notes/baseline_searchr1.md)). Earlier experiments on this plateau (reward arms, forced-depth curves) are on the `archive/depth-study` branch.
+Experiment registry (setup, commands, run paths, result tables): [`exps/INDEX.md`](exps/INDEX.md).
 
 ## How it works
 
@@ -74,14 +70,9 @@ bash scripts/eval_checkpoint.sh $DATA_ROOT/logs/<run>/ckpt/global_step_60   # me
 | path | contents |
 |---|---|
 | `retrieval/` | corpus encoding, index build, retrieval server, benchmark |
-| `agent/` | rollout protocol and depth policy (`search_r1_rollout.py`), verl agent loop, reward, QA metrics, per-step depth stats, training data and labels |
+| `agent/` | rollout protocol (`search_r1_rollout.py`), verl agent loop, reward, QA metrics, training data |
 | `baselines/` | Search-R1-style inference for evaluating any checkpoint |
 | `tests/` | eval-set builder, scorer, unit tests for the metrics and the rollout contract (loss mask, tags, reward) |
 | `scripts/` | launch scripts for every stage |
 | `configs/` | GPU assignment, agent-loop settings |
-
-## Limitations
-
-- **One training seed**, evaluated on 300-question subsets. The standard error is about 2.6 EM per set.
-- **Short training:** 60 steps covers the early regime only.
-- **Approximate retrieval:** the index is IVF-SQ8, which lowers absolute numbers slightly relative to exact search.
+| `exps/` | experiment cards and index |
