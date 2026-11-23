@@ -11,7 +11,7 @@ Reports, on N HotpotQA dev questions:
   recall@10  (optional, --emb-dir) approximate index vs exact brute-force search over the raw
              shards, on --exact-n queries: the cost of IVF-SQ8 vs a flat index
 
-Example (server running): .venv/bin/python retrieval/bench_retrieval.py --url http://127.0.0.1:8000 --n 1000 --topk 3
+Example: scripts/bench_retrieval.sh
 """
 
 import argparse

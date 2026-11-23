@@ -1,4 +1,4 @@
-"""Rewards in agent/reward.py, including the adversarial inputs from roadmap P3.3.
+"""Reward arms in agent/reward.py, including the adversarial inputs from roadmap P3.3.
 Run: .venv/bin/python -m pytest tests/ -q"""
 
 import sys
@@ -35,8 +35,10 @@ def score(t, metric, **kw):
 
 
 @pytest.mark.parametrize("metric", REWARDS)
-def test_no_answer_scores_zero(metric):
+def test_no_answer_scores_zero_on_every_arm(metric):
     for t in ("", "<search> Paris </search>" + info("Paris"), "<answer> Paris", SEARCH_R1_INVALID):
+        if metric == "em_hit" and "information" in t:
+            continue  # evidence alone is paid by design
         assert score(t, metric) == 0.0
 
 
@@ -50,6 +52,13 @@ def test_em_and_f1_ignore_search_count():
         assert score(ONE_SEARCH_RIGHT, m) == score(TWO_SEARCH_RIGHT, m) == score(NO_SEARCH_RIGHT, m) == 1.0
 
 
+def test_em_hit_pays_evidence_even_with_wrong_answer():
+    assert score(EVIDENCE_WRONG_ANSWER, "em_hit") == pytest.approx(0.2)
+    assert score(ONE_SEARCH_RIGHT, "em_hit") == pytest.approx(1.2)
+    assert score(NO_SEARCH_RIGHT, "em_hit") == 1.0          # no retrieval, no bonus
+    assert score(EVIDENCE_WRONG_ANSWER, "em_hit", hit_bonus=0.5) == pytest.approx(0.5)
+
+
 def test_evidence_hit_is_whole_word_and_reads_only_env_text():
     assert answer_in_information(info("Parisian cafe"), ["Paris"]) == 0.0
     assert answer_in_information(info("in paris, france"), ["Paris"]) == 1.0
@@ -57,17 +66,25 @@ def test_evidence_hit_is_whole_word_and_reads_only_env_text():
     assert answer_in_information("<search> Paris </search><answer> Paris </answer>", ["Paris"]) == 0.0
 
 
-def test_long_answer_containing_gold_is_not_paid_by_em():
+def test_em_multi_pays_only_correct_answers_with_two_distinct_queries():
+    assert score(TWO_SEARCH_RIGHT, "em_multi") == pytest.approx(1.2)
+    assert score(ONE_SEARCH_RIGHT, "em_multi") == 1.0
+    assert score(TWO_SAME_QUERY, "em_multi") == 1.0          # repeating a query (after normalization) doesn't count
+    wrong = TWO_SEARCH_RIGHT.replace("<answer> Paris </answer>", "<answer> Lyon </answer>")
+    assert score(wrong, "em_multi") == 0.0                    # search spam alone earns nothing
+
+
+def test_long_answer_containing_gold_is_not_paid_by_em_arms():
     long = "<answer> it is probably Paris or maybe somewhere else in Europe </answer>"
-    out = compute_score("hotpotqa", long, GOLD)
-    assert out["score"] == 0.0 and out["acc"] == 1.0          # why lenient cover match is not a reward
+    for m in ("em", "em_hit", "em_multi"):
+        assert score(long, m) == 0.0
+    assert score(long, "acc") == 1.0                          # why acc is not a training arm
 
 
 def test_logged_keys():
     out = compute_score("hotpotqa", TWO_SEARCH_RIGHT, GOLD)
     assert out["n_search"] == 2 and out["n_distinct_search"] == 2
-    assert out["evidence_hit"] == 1.0
-    assert compute_score("hotpotqa", TWO_SAME_QUERY, GOLD)["n_distinct_search"] == 1   # repeats count once
+    assert out["evidence_hit"] == 1.0 and out["correct_multi"] == 1.0
 
 
 # ---- batch entry point and per-step depth statistics (agent/step_stats.py) ------------------

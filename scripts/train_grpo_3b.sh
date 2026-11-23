@@ -5,7 +5,7 @@
 #   bash scripts/train_grpo_3b.sh full                   # one-day run: 300 steps of 128 x 5
 #   TOTAL_STEPS=3 bash scripts/train_grpo_3b.sh full     # pilot: step time and memory before a long run
 #   DRY_RUN=1 bash scripts/train_grpo_3b.sh full         # print the resolved verl config, start nothing
-#   REWARD=f1 bash scripts/train_grpo_3b.sh full         # reward: em (default) or f1 (agent/reward.py)
+#   REWARD=em_hit bash scripts/train_grpo_3b.sh full     # reward arm: em (default), f1, em_hit, em_multi (agent/reward.py)
 #   DEPTH_POLICY=exact:2 bash scripts/train_grpo_3b.sh full   # env writes the action tags: free (default), exact:k, min:k
 #   SEED=2 bash scripts/train_grpo_3b.sh full            # data order + vLLM sampling seed (unset = earlier runs)
 #   MODEL=Qwen/Qwen2.5-1.5B bash scripts/train_grpo_3b.sh full   # other model; its name goes in the run name
@@ -58,7 +58,9 @@ WARMUP_RATIO=${WARMUP_RATIO:-0.285}
 TEST_FREQ=${TEST_FREQ:-50}
 SAVE_FREQ=${SAVE_FREQ:-100}
 CKPT_KEEP=${CKPT_KEEP:-3}              # a full fine-tuning checkpoint with optimizer state is ~40 GB
-REWARD=${REWARD:-em}                   # agent/reward.py REWARDS
+REWARD=${REWARD:-em}                   # agent/reward.py REWARDS; everything else is held fixed across arms
+HIT_BONUS=${HIT_BONUS:-0.2}            # em_hit: reward for gold answer appearing in retrieved passages
+MULTI_BONUS=${MULTI_BONUS:-0.2}        # em_multi: reward for a correct answer reached with >= 2 distinct queries
 DEPTH_POLICY=${DEPTH_POLICY:-free}     # agent/search_r1_rollout.py; validation runs at this depth too (eval_checkpoint.sh for free depth)
 SEED=${SEED:-}                          # unset: verl defaults (data order seed 1, vLLM seed 0), as in the earlier runs;
                                        # set: data.seed and rollout.seed both = SEED
@@ -128,7 +130,7 @@ export WANDB_DIR=$OUT WANDB_JOB_TYPE=train WANDB_RUN_GROUP=${GROUP:-$METHOD} WAN
 export WANDB_TAGS="reward:$REWARD,depth:${DEPTH_POLICY},seed:${SEED:-default},model:$MODEL_NAME${RESUME_FROM:+,resumed},git:$(git rev-parse --short HEAD 2>/dev/null || echo none)$(git diff --quiet HEAD 2>/dev/null || echo -dirty)"
 {
     echo "date: $(date -Is)"; echo "git: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD"; echo "depth_policy: $DEPTH_POLICY  seed: ${SEED:-default}  resume_from: ${RESUME_FROM:-none}"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"
+    echo "method: $METHOD  lr: $LR  model: $MODEL_PATH"; echo "reward: $REWARD hit_bonus=$HIT_BONUS multi_bonus=$MULTI_BONUS"; echo "depth_policy: $DEPTH_POLICY  seed: ${SEED:-default}  resume_from: ${RESUME_FROM:-none}"; echo "gpus: $GPUS (retrieval on $RETRIEVAL_GPU)"
     echo "batch=$TRAIN_BATCH n=$ROLLOUT_N mini=$MINI_BATCH max_response=$MAX_RESPONSE steps=$TOTAL_STEPS"
     echo "--- agent_loop.yaml"; cat "$OUT/agent_loop.yaml"
 } > "$OUT/config.txt"
@@ -176,6 +178,8 @@ CUDA_VISIBLE_DEVICES=$GPUS taskset -c "$(cpus_for "$GPUS")" "$PY" -m verl.traine
     +custom_reward_function.reward_kwargs.log_path="$OUT/reward_steps.jsonl" \
     +custom_reward_function.reward_kwargs.step_offset=$STEP_OFFSET \
     +custom_reward_function.reward_kwargs.metric=$REWARD \
+    +custom_reward_function.reward_kwargs.hit_bonus=$HIT_BONUS \
+    +custom_reward_function.reward_kwargs.multi_bonus=$MULTI_BONUS \
     trainer.critic_warmup=0 \
     trainer.logger="$LOGGER" \
     trainer.project_name=search-agent-rl \
